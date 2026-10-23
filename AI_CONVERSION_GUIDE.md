@@ -62,7 +62,7 @@
 | 0 | **Data Layer** (`common.js`) | ☐ |
 | 1 | Splash | ✅ শেষ |
 | 2 | Login | ✅ |
-| 3 | Signup | ☐ |
+| 3 | Signup | ✅ |
 | 4 | Task | ☐ |
 | 5 | Profile | ☐ |
 | 6 | Support | ☐ |

@@ -71,7 +71,15 @@ private fun AppNav() {
                 }
             )
         }
-        composable(Routes.SIGNUP) { PlaceholderScreen("সাইনআপ") }
+        composable(Routes.SIGNUP) {
+            SignupScreen(
+                onSuccess = {
+                    nav.navigate(Routes.TASK) {
+                        popUpTo(Routes.SIGNUP) { inclusive = true }
+                    }
+                }
+            )
+        }
         composable(Routes.TASK) { PlaceholderScreen("টাস্ক") }
     }
 }
