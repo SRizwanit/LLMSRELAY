@@ -7,8 +7,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,7 +31,7 @@ fun BookGrid(
     booksById: Map<String, JSONObject>,
     query: String,
     onQueryChange: (String) -> Unit,
-    resume: JSONObject?,
+    resume: ResumeTarget?,
     rateOf: (JSONObject?) -> Int,
     onOpen: (String, String) -> Unit
 ) {
@@ -55,7 +53,7 @@ fun BookGrid(
             onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             placeholder = { Text("কিতাব বা লেখক খুঁজুন…") },
-            leadingIcon = { Icon(Icons.Default.Search, null) },
+            leadingIcon = { Text("🔍", fontSize = 18.sp) },
             singleLine = true,
             shape = RoundedCornerShape(10.dp),
             colors = OutlinedTextFieldDefaults.colors(
@@ -77,18 +75,18 @@ fun BookGrid(
                     val bookId = b.optInt("id", 0).toString()
                     val count = countByBook[bookId]?.n ?: 0
                     val total = b.optInt("total_pages", 0)
-                    val resumeStem = if (resume != null && resume.optInt("book_id", 0).toString() == bookId) {
-                        resume.optString("stem", "")
-                    } else ""
+                    val isResume = resume != null && resume.book.optInt("id", 0).toString() == bookId
 
                     BookCard(
                         book = b,
                         done = count,
                         total = total,
                         rate = rateOf(b),
-                        isResume = resumeStem.isNotEmpty(),
+                        isResume = isResume,
                         onClick = {
-                            val stem = resumeStem.ifEmpty {
+                            val stem = if (isResume) {
+                                resume.stem
+                            } else {
                                 if (count < total) "page_${count + 1}" else "page_1"
                             }
                             onOpen(bookId, stem)

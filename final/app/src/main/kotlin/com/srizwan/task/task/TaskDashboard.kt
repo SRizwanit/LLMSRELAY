@@ -111,12 +111,7 @@ fun TaskDashboard(
                 booksById = booksById,
                 query = query,
                 onQueryChange = onQueryChange,
-                resume = resume?.let {
-                    JSONObject().apply {
-                        put("book_id", it.book.optInt("id"))
-                        put("stem", it.stem)
-                    }
-                },
+                resume = resume,
                 rateOf = rateOf,
                 onOpen = onResume
             )

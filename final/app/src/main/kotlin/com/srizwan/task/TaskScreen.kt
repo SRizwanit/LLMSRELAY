@@ -15,6 +15,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.srizwan.task.task.PayPane
 import com.srizwan.task.task.TaskDashboard
+import com.srizwan.task.task.resumeTarget
 
 @Composable
 fun TaskScreen(navController: NavController, vm: TaskViewModel = viewModel()) {
@@ -100,6 +101,9 @@ private fun TaskPane(state: TaskState, vm: TaskViewModel, navController: NavCont
     when (state.tab) {
         TaskTab.TASK -> {
             val booksById = state.books.associateBy { it.optInt("id", 0).toString() }
+            val goal = vm.readGoalFromPrefs(context, state.me?.optInt("id") ?: 0)
+            val resume = vm.findResume(state.proofs, booksById)
+            val resumeT = resumeTarget(resume, booksById, state.proofs)
 
             TaskDashboard(
                 ready = state.me != null && state.books.isNotEmpty(),
@@ -109,10 +113,8 @@ private fun TaskPane(state: TaskState, vm: TaskViewModel, navController: NavCont
                 booksById = booksById,
                 query = state.query,
                 onQueryChange = { vm.setQuery(it) },
-                goal = state.goal,
-                resume = state.resume?.let {
-                    com.srizwan.task.task.resumeTarget(it, booksById, state.proofs)
-                },
+                goal = goal,
+                resume = resumeT,
                 rateOf = vm::rateOf,
                 onGoal = { vm.showGoalDialog(true) },
                 onResume = { book, stem ->
@@ -122,16 +124,10 @@ private fun TaskPane(state: TaskState, vm: TaskViewModel, navController: NavCont
         }
         TaskTab.PAY -> {
             PayPane(
-                hidden = false,
-                me = state.me ?: org.json.JSONObject(),
-                settings = state.settings,
-                sum = state.fin?.sum,
-                booksById = state.fin?.booksById ?: emptyMap(),
+                state = state,
+                vm = vm,
                 proofs = state.proofs,
-                pays = state.pays,
-                rateOf = vm::rateOf,
-                reqBusy = state.reqBusy,
-                onRequest = { vm.requestPayment(context) }
+                pays = state.pays
             )
         }
         TaskTab.RANK -> PlaceholderPane("র‍্যাংক")
