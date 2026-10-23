@@ -1,0 +1,5 @@
+# এই ফাইলটা কপি করে local.properties নাম দিন (git-এ যাবে না)
+SB_URL=https://xxxx.supabase.co
+SB_KEY=your-anon-key
+ADMIN_PHONE=01XXXXXXXXX
+ADMIN_WA=8801XXXXXXXXX
