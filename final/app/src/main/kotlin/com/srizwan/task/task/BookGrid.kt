@@ -1,115 +1,98 @@
 package com.srizwan.task.task
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.ripple
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.SubcomposeAsyncImage
+import coil3.compose.AsyncImage
 import com.srizwan.task.AppColors
 import org.json.JSONObject
 
+data class BookUserCount(val n: Int)
+
 @Composable
 fun BookGrid(
-    status: String,
-    spinning: Boolean,
+    ready: Boolean,
     books: List<JSONObject>,
+    proofs: List<JSONObject>,
+    booksById: Map<String, JSONObject>,
     query: String,
-    bookCounts: Map<String, Int>,
-    byBook: Map<String, BookUserCount>,
+    onQueryChange: (String) -> Unit,
     resume: JSONObject?,
-    rateOf: (JSONObject) -> Int,
-    onOpen: (Int) -> Unit
+    rateOf: (JSONObject?) -> Int,
+    onOpen: (String, String) -> Unit
 ) {
-    val q = query.trim().lowercase()
-    val list = books.filter {
-        if (q.isEmpty()) true
-        else {
-            val name = it.optString("name", "").lowercase()
-            val author = it.optString("author", "").lowercase()
-            name.contains(q) || author.contains(q)
+    val countByBook = proofs.groupBy { it.optInt("book_id", 0).toString() }
+        .mapValues { (_, list) -> BookUserCount(list.size) }
+
+    val filtered = if (query.isEmpty()) {
+        books
+    } else {
+        books.filter {
+            it.optString("name", "").contains(query, ignoreCase = true) ||
+                    it.optString("author", "").contains(query, ignoreCase = true)
         }
     }
 
-    val skeleton = books.isEmpty() && status == "loading"
-    val failed = books.isEmpty() && status == "error"
-    val showEmpty = !skeleton && (failed || list.isEmpty())
+    Column {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            placeholder = { Text("কিতাব বা লেখক খুঁজুন…") },
+            leadingIcon = { Icon(Icons.Default.Search, null) },
+            singleLine = true,
+            shape = RoundedCornerShape(10.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = AppColors.extra.line
+            )
+        )
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (spinning) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-                    .align(Alignment.TopCenter)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.3f)
-                        .height(3.dp)
-                        .background(MaterialTheme.colorScheme.primary)
-                )
-            }
-        }
-
-        if (skeleton) {
-            SkeletonGrid()
-        } else if (showEmpty) {
-            EmptyView(failed)
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
+        when {
+            !ready -> SkeletonGrid()
+            filtered.isEmpty() -> EmptyView(failed = books.isEmpty())
+            else -> LazyVerticalGrid(
+                columns = GridCells.Adaptive(140.dp),
+                contentPadding = PaddingValues(0.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(list, key = { it.optInt("id", 0) }) { b ->
+                items(filtered) { b ->
+                    val bookId = b.optInt("id", 0).toString()
+                    val count = countByBook[bookId]?.n ?: 0
+                    val total = b.optInt("total_pages", 0)
+                    val resumeStem = if (resume != null && resume.optInt("book_id", 0).toString() == bookId) {
+                        resume.optString("stem", "")
+                    } else ""
+
                     BookCard(
                         book = b,
-                        bookCounts = bookCounts,
-                        byBook = byBook,
-                        resume = resume,
-                        rateOf = rateOf,
-                        onOpen = onOpen
+                        done = count,
+                        total = total,
+                        rate = rateOf(b),
+                        isResume = resumeStem.isNotEmpty(),
+                        onClick = {
+                            val stem = resumeStem.ifEmpty {
+                                if (count < total) "page_${count + 1}" else "page_1"
+                            }
+                            onOpen(bookId, stem)
+                        }
                     )
                 }
             }
@@ -120,198 +103,138 @@ fun BookGrid(
 @Composable
 private fun BookCard(
     book: JSONObject,
-    bookCounts: Map<String, Int>,
-    byBook: Map<String, BookUserCount>,
-    resume: JSONObject?,
-    rateOf: (JSONObject) -> Int,
-    onOpen: (Int) -> Unit
+    done: Int,
+    total: Int,
+    rate: Int,
+    isResume: Boolean,
+    onClick: () -> Unit
 ) {
-    val id = book.optInt("id", 0).toString()
-    val done = bookCounts[id] ?: 0
-    val total = book.optInt("total_pages", 0)
-    val mine = byBook[id]?.n ?: 0
-    val last = resume != null && resume.optString("b", "") == id
-
-    Column(
+    Card(
         modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = ripple(),
-                role = Role.Button,
-                onClick = { onOpen(book.optInt("id", 0)) }
-            )
-            .padding(10.dp)
+            .width(140.dp)
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(10.dp),
+        elevation = CardDefaults.cardElevation(2.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.7f)
-                .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        ) {
+        Column {
             Cover(url = book.optString("cover_url", ""))
-            if (last) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.primary)
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
+
+            Column(modifier = Modifier.padding(10.dp)) {
+                Text(
+                    text = book.optString("name", "কিতাব"),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    lineHeight = 16.sp
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = book.optString("author", "লেখক"),
+                    fontSize = 11.sp,
+                    color = AppColors.extra.muted,
+                    maxLines = 1
+                )
+                Spacer(Modifier.height(8.dp))
+
+                Progress(done, total)
+
+                Spacer(Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "শেষ কাজ",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        fontWeight = FontWeight.Bold
+                        text = rateTxt(rate),
+                        fontSize = 11.sp,
+                        color = AppColors.extra.gold,
+                        fontWeight = FontWeight.Medium
                     )
+                    if (isResume) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        ) {
+                            Text(
+                                text = "চালিয়ে",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontSize = 10.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+}
 
-        Spacer(Modifier.height(8.dp))
-
-        Text(
-            text = book.optString("name", ""),
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-
-        val author = book.optString("author", "")
-        if (author.isNotEmpty()) {
-            Spacer(Modifier.height(2.dp))
+@Composable
+private fun Cover(url: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(180.dp)
+            .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp))
+            .background(AppColors.extra.canvas),
+        contentAlignment = Alignment.Center
+    ) {
+        if (url.isNotEmpty()) {
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
             Text(
-                text = author,
-                style = MaterialTheme.typography.bodySmall,
-                fontSize = 12.sp,
-                color = AppColors.extra.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                text = "📖",
+                fontSize = 48.sp,
+                color = AppColors.extra.muted
             )
         }
+    }
+}
 
-        Spacer(Modifier.height(8.dp))
-
-        Progress(done = done, total = total)
-
-        Spacer(Modifier.height(6.dp))
-
+@Composable
+private fun Progress(done: Int, total: Int) {
+    val pct = if (total > 0) (done.toFloat() / total) else 0f
+    Column {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(5.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(AppColors.extra.line)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(pct.coerceIn(0f, 1f))
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
         Text(
-            text = "রেট ${rateTxt(rateOf(book))}/পেইজ${if (mine > 0) " • আমার ${bn(mine)}" else ""}",
-            style = MaterialTheme.typography.bodySmall,
-            fontSize = 11.sp,
+            text = "${bn(done)} / ${bn(total)} পেইজ",
+            fontSize = 10.sp,
             color = AppColors.extra.muted
         )
     }
 }
 
 @Composable
-private fun Cover(url: String) {
-    var bad by remember { mutableStateOf(false) }
-
-    if (url.isEmpty() || bad) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(id = android.R.drawable.ic_menu_gallery),
-                contentDescription = null,
-                modifier = Modifier.size(48.dp),
-                tint = AppColors.extra.muted.copy(alpha = 0.5f)
-            )
-        }
-    } else {
-        SubcomposeAsyncImage(
-            model = url,
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-            loading = {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                }
-            },
-            onError = { bad = true }
-        )
-    }
-}
-
-@Composable
-private fun Progress(done: Int, total: Int) {
-    if (total > 0) {
-        val rem = maxOf(0, total - done)
-        val pct = minOf(100f, done.toFloat() / total * 100f)
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(MaterialTheme.colorScheme.outline)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(pct / 100f)
-                    .height(4.dp)
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-        }
-
-        Spacer(Modifier.height(4.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "${bn(done)} সম্পন্ন",
-                fontSize = 11.sp,
-                color = AppColors.extra.muted
-            )
-            Text(
-                text = "${bn(rem)} বাকি",
-                fontSize = 11.sp,
-                color = AppColors.extra.muted
-            )
-        }
-    } else if (done > 0) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "${bn(done)} সম্পন্ন",
-                fontSize = 11.sp,
-                color = AppColors.extra.muted
-            )
-            Text(
-                text = "বাকি অজানা",
-                fontSize = 11.sp,
-                color = AppColors.extra.muted,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
-
-@Composable
 private fun SkeletonGrid() {
     LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
+        columns = GridCells.Adaptive(140.dp),
+        contentPadding = PaddingValues(0.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        items(4) {
+        items(6) {
             SkeletonCard()
         }
     }
@@ -319,79 +242,41 @@ private fun SkeletonGrid() {
 
 @Composable
 private fun SkeletonCard() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(10.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.7f)
-                .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
-        Spacer(Modifier.height(8.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.8f)
-                .height(14.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
-        Spacer(Modifier.height(6.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.5f)
-                .height(12.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
-        Spacer(Modifier.height(8.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
-        Spacer(Modifier.height(6.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.6f)
-                .height(11.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        )
-    }
+    Card(
+        modifier = Modifier.width(140.dp).height(280.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        shape = RoundedCornerShape(10.dp)
+    ) {}
 }
 
 @Composable
 private fun EmptyView(failed: Boolean) {
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = if (failed) "কিতাব লোড হয়নি — নেট দেখে রিফ্রেশ চাপুন" else "কোনো কিতাব পাওয়া যায়নি",
-            style = MaterialTheme.typography.bodyMedium,
-            color = AppColors.extra.muted,
-            fontSize = 14.sp
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = if (failed) "কিতাব লোড হয়নি" else "কিছু পাওয়া যায়নি",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = AppColors.extra.muted
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = if (failed) "ইন্টারনেট সংযোগ চেক করুন" else "অন্য শব্দ দিয়ে খুঁজুন",
+                fontSize = 12.sp,
+                color = AppColors.extra.muted
+            )
+        }
     }
 }
 
-data class BookUserCount(val n: Int)
-
 fun rateTxt(rate: Int): String {
-    return if (rate <= 0) "—" else bn(rate)
+    return "৳${bn(rate)}/পেইজ"
 }
 
 private fun bn(n: Int): String {
-    val bengali = arrayOf('০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯')
-    return n.toString().map { if (it.isDigit()) bengali[it - '0'] else it }.joinToString("")
+    val map = mapOf('0' to '০', '1' to '১', '2' to '২', '3' to '৩', '4' to '৪', '5' to '৫', '6' to '৬', '7' to '৭', '8' to '৮', '9' to '৯')
+    return n.toString().map { map[it] ?: it }.joinToString("")
 }

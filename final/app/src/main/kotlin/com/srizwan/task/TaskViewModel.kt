@@ -1,38 +1,39 @@
 package com.srizwan.task
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.srizwan.task.data.Api
-import com.srizwan.task.task.BookUserCount
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import com.srizwan.task.task.PaySum
+import com.srizwan.task.task.BookPaySum
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.net.URLEncoder
 
 enum class TaskTab { TASK, PAY, RANK }
 
 data class TaskState(
     val tab: TaskTab = TaskTab.TASK,
-    val status: String = "loading",
-    val spinning: Boolean = false,
-    val query: String = "",
+    val me: JSONObject? = null,
+    val settings: JSONObject? = null,
     val books: List<JSONObject> = emptyList(),
-    val booksById: Map<String, JSONObject> = emptyMap(),
     val proofs: List<JSONObject> = emptyList(),
-    val bookCounts: Map<String, Int> = emptyMap(),
-    val byBook: Map<String, BookUserCount> = emptyMap(),
-    val goal: Int = 5,
+    val pays: List<JSONObject> = emptyList(),
+    val fin: FinData? = null,
+    val rank: RankData? = null,
+    val query: String = "",
+    val goal: Int = 0,
     val resume: JSONObject? = null,
-    val finData: FinData = FinData(),
-    val rankData: RankData = RankData()
+    val reqBusy: Boolean = false,
+    val error: String? = null
 )
 
 data class FinData(
-    val rates: Map<Int, Int> = emptyMap(),
-    val balance: Int = 0,
-    val pending: Int = 0,
-    val paid: Int = 0
+    val sum: PaySum,
+    val booksById: Map<String, JSONObject>
 )
 
 data class RankData(
@@ -40,108 +41,194 @@ data class RankData(
 )
 
 class TaskViewModel : ViewModel() {
-    private val _state = MutableStateFlow(TaskState())
-    val state = _state.asStateFlow()
+    var state by mutableStateOf(TaskState())
+        private set
 
     fun load(context: Context) {
-        val s = Session.get(context) ?: return
-        val userId = s.optInt("id", 0)
-        if (userId == 0) return
-
         viewModelScope.launch {
-            _state.value = _state.value.copy(status = "loading", spinning = true)
             try {
+                val session = Session.get(context) ?: return@launch
+                val userId = session.optInt("id")
+                val api = Api(context)
+
+                val settingsArr = api.get("app_settings?select=*&limit=1")
+                val settings = if (settingsArr.length() > 0) settingsArr.getJSONObject(0) else null
+
+                val meArr = api.get("app_users?id=eq.$userId&select=*&limit=1")
+                val me = if (meArr.length() > 0) meArr.getJSONObject(0) else null
+
+                val goal = readGoalFromPrefs(context, userId)
+                val resumeArr = api.get("user_resume?user_id=eq.$userId&select=*&limit=1")
+                val resume = if (resumeArr.length() > 0) resumeArr.getJSONObject(0) else null
+
                 loadBooks(context)
                 loadCount(context, userId)
-                val goal = readGoalFromPrefs(context, userId)
-                _state.value = _state.value.copy(status = "ready", spinning = false, goal = goal)
                 loadMoney(context, userId)
+
+                state = state.copy(me = me, settings = settings, goal = goal, resume = resume, error = null)
             } catch (e: Exception) {
-                _state.value = _state.value.copy(status = "error", spinning = false)
+                state = state.copy(error = e.message ?: "লোড ব্যর্থ")
             }
         }
     }
 
     fun switchTab(t: TaskTab) {
-        _state.value = _state.value.copy(tab = t)
+        state = state.copy(tab = t)
     }
 
     fun setQuery(q: String) {
-        _state.value = _state.value.copy(query = q)
+        state = state.copy(query = q)
+    }
+
+    fun showGoalDialog(show: Boolean) {
+        // TODO: goal dialog state
     }
 
     private suspend fun loadBooks(context: Context) {
         val api = Api(context)
-        val arr = api.get("app_books?select=*&order=id.asc")
-        val list = (0 until arr.length()).map { arr.getJSONObject(it) }
-        val map = list.associateBy { it.optInt("id", 0).toString() }
-        _state.value = _state.value.copy(books = list, booksById = map)
+        val arr = api.get("app_books?select=*&order=position.asc")
+        val books = (0 until arr.length()).map { arr.getJSONObject(it) }
+        state = state.copy(books = books)
     }
 
     private suspend fun loadCount(context: Context, userId: Int) {
         val api = Api(context)
-        val s = Session.get(context) ?: return
-
-        val proofsArr = api.get("page_proofs?user_id=eq.$userId&select=*&order=created_at.desc")
-        val proofs = (0 until proofsArr.length()).map { proofsArr.getJSONObject(it) }
-
-        val countMap = mutableMapOf<String, Int>()
-        val byBookMap = mutableMapOf<String, BookUserCount>()
-
-        proofs.forEach { p ->
-            val bid = p.optInt("book_id", 0).toString()
-            countMap[bid] = (countMap[bid] ?: 0) + 1
-            byBookMap[bid] = BookUserCount((byBookMap[bid]?.n ?: 0) + 1)
-        }
-
-        val resume = if (proofs.isNotEmpty()) {
-            val last = proofs.first()
-            JSONObject().apply {
-                put("b", last.optInt("book_id", 0).toString())
-                put("p", last.optInt("page_num", 0))
-            }
-        } else null
-
-        _state.value = _state.value.copy(
-            proofs = proofs,
-            bookCounts = countMap,
-            byBook = byBookMap,
-            resume = resume
-        )
+        val arr = api.get("page_proofs?user_id=eq.$userId&select=*&order=created_at.desc")
+        val proofs = (0 until arr.length()).map { arr.getJSONObject(it) }
+        state = state.copy(proofs = proofs)
     }
 
     private suspend fun loadMoney(context: Context, userId: Int) {
         val api = Api(context)
-        val books = _state.value.books
+        val proofsArr = api.get("page_proofs?user_id=eq.$userId&select=book_id,review_status,amount&order=created_at.desc")
+        val proofs = (0 until proofsArr.length()).map { proofsArr.getJSONObject(it) }
 
-        val ratesMap = books.associate {
-            val id = it.optInt("id", 0)
-            val rate = it.optInt("base_rate", 0)
-            id to rate
-        }
+        val paysArr = api.get("payments?user_id=eq.$userId&select=*&order=created_at.desc")
+        val pays = (0 until paysArr.length()).map { paysArr.getJSONObject(it) }
 
-        val payArr = api.get("user_payments?user_id=eq.$userId&select=*")
-        var balance = 0
-        var pending = 0
+        var earned = 0
         var paid = 0
+        var requested = 0
+        var pending = 0
+        var pendingAmt = 0
+        var approved = 0
+        var correction = 0
+        val byBook = mutableMapOf<String, MutableMap<String, Int>>()
 
-        for (i in 0 until payArr.length()) {
-            val p = payArr.getJSONObject(i)
+        proofs.forEach { p ->
+            val st = p.optString("review_status", "")
             val amt = p.optInt("amount", 0)
-            val st = p.optString("status", "")
+            val bookId = p.optInt("book_id", 0).toString()
+            byBook.getOrPut(bookId) {
+                mutableMapOf("n" to 0, "approved" to 0, "pending" to 0, "correction" to 0, "earned" to 0)
+            }.apply {
+                this["n"] = (this["n"] ?: 0) + 1
+            }
+
             when (st) {
-                "pending" -> pending += amt
-                "paid" -> paid += amt
+                "approved" -> {
+                    earned += amt
+                    approved++
+                    byBook[bookId]!!["approved"] = (byBook[bookId]!!["approved"] ?: 0) + 1
+                    byBook[bookId]!!["earned"] = (byBook[bookId]!!["earned"] ?: 0) + amt
+                }
+                "pending" -> {
+                    pending++
+                    pendingAmt += amt
+                    byBook[bookId]!!["pending"] = (byBook[bookId]!!["pending"] ?: 0) + 1
+                }
+                "correction" -> {
+                    correction++
+                    byBook[bookId]!!["correction"] = (byBook[bookId]!!["correction"] ?: 0) + 1
+                }
             }
         }
 
-        balance = pending
+        pays.forEach { x ->
+            val st = x.optString("status", "")
+            val amt = x.optInt("amount", 0)
+            when (st) {
+                "paid" -> paid += amt
+                "requested" -> requested += amt
+            }
+        }
 
-        _state.value = _state.value.copy(finData = FinData(ratesMap, balance, pending, paid))
+        val available = earned - paid - requested
+        val sum = PaySum(
+            earned = earned,
+            available = available,
+            paid = paid,
+            requested = requested,
+            pending = pending,
+            pendingAmt = pendingAmt,
+            approved = approved,
+            correction = correction,
+            byBook = byBook.mapValues { (_, v) ->
+                BookPaySum(
+                    n = v["n"] ?: 0,
+                    approved = v["approved"] ?: 0,
+                    pending = v["pending"] ?: 0,
+                    correction = v["correction"] ?: 0,
+                    earned = v["earned"] ?: 0
+                )
+            }
+        )
+
+        val booksById = state.books.associateBy { it.optInt("id", 0).toString() }
+        state = state.copy(
+            fin = FinData(sum = sum, booksById = booksById),
+            pays = pays
+        )
+    }
+
+    fun rateOf(book: JSONObject?): Int {
+        val settings = state.settings ?: return 0
+        return if (book != null) {
+            book.optInt("rate_per_page", settings.optInt("default_rate", 0))
+        } else {
+            settings.optInt("default_rate", 0)
+        }
+    }
+
+    fun requestPayment(context: Context) {
+        if (state.reqBusy) return
+        state = state.copy(reqBusy = true, error = null)
+        viewModelScope.launch {
+            try {
+                val me = state.me ?: return@launch
+                val userId = me.optInt("id")
+                val fin = state.fin ?: return@launch
+                val available = fin.sum.available
+
+                if (available < (state.settings?.optInt("min_payout", 100) ?: 100)) {
+                    state = state.copy(reqBusy = false, error = "পর্যাপ্ত টাকা নেই")
+                    return@launch
+                }
+                if (me.optString("payment_number", "").isEmpty()) {
+                    state = state.copy(reqBusy = false, error = "পেমেন্ট নাম্বার নেই")
+                    return@launch
+                }
+
+                val api = Api(context)
+                val body = JSONObject().apply {
+                    put("user_id", userId)
+                    put("amount", available)
+                    put("status", "requested")
+                    put("method", me.optString("payment_method"))
+                    put("number", me.optString("payment_number"))
+                }
+                api.post("payments", body)
+
+                loadMoney(context, userId)
+                state = state.copy(reqBusy = false)
+            } catch (e: Exception) {
+                state = state.copy(reqBusy = false, error = e.message ?: "রিকোয়েস্ট ব্যর্থ")
+            }
+        }
     }
 
     private fun readGoalFromPrefs(context: Context, userId: Int): Int {
-        val prefs = context.getSharedPreferences("kp_task", Context.MODE_PRIVATE)
-        return prefs.getInt("goal_u$userId", 5)
+        val prefs = context.getSharedPreferences("kp_session", Context.MODE_PRIVATE)
+        return prefs.getInt("goal_$userId", 0)
     }
 }
