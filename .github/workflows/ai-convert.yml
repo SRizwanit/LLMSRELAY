@@ -1,0 +1,641 @@
+# .github/workflows/ai-convert.yml
+# AI_CONVERSION_GUIDE.md অনুযায়ী React -> Kotlin (Jetpack Compose) কনভার্সন, ধাপে ধাপে। আউটপুট: final/
+#
+# লাগবে: Settings → Secrets and variables → Actions → New repository secret
+#   LLM_API_KEY  (আবশ্যক)  : llmsrelay.com এর API key
+#   SB_URL, SB_KEY, ADMIN_PHONE, ADMIN_WA   (ঐচ্ছিক, বিল্ডে BuildConfig-এর জন্য)
+#   FB_API_KEY, FB_APP_ID, FB_DB_URL, FB_PROJECT_ID  (ঐচ্ছিক, Support ধাপের Firebase)
+# এবং Settings → Actions → General → Workflow permissions = "Read and write permissions"
+name: AI Convert (React to Kotlin)
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_steps:
+        description: "যে ধাপ/উপ-ধাপ বাদ (কমা দিয়ে). 0,2 আগের zip-এ করা আছে; 1 = Splash"
+        default: "0,1,2"
+      only_steps:
+        description: "শুধু এগুলো করো (যেমন 4b,4c বা 7). ফাঁকা = সব"
+        default: ""
+      model:
+        description: "মডেল"
+        default: "claude-opus-5-5"
+      max_fix:
+        description: "বিল্ড ফেইল হলে সর্বোচ্চ অটো-ফিক্স রাউন্ড"
+        default: "3"
+      include_optional:
+        description: "guideScenes.js (গাইড অ্যানিমেশন) ও যুক্ত করো"
+        type: boolean
+        default: false
+      continue_on_fail:
+        description: "কোনো ধাপের বিল্ড ফেইল করলেও পরের ধাপে যাও"
+        type: boolean
+        default: false
+      auto_continue:
+        description: "৬ ঘণ্টার সীমায় থামলে নিজে নিজে আবার শুরু হোক"
+        type: boolean
+        default: true
+      dry_run:
+        description: "শুধু ধাপ ও ফাইল তালিকা দেখাও (API/বিল্ড নয়)"
+        type: boolean
+        default: false
+      gradle_version:
+        description: "Gradle ভার্সন"
+        default: "9.7.0"
+
+concurrency:
+  group: ai-convert
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unzip uploaded zips (যদি রিপোতে zip আকারে থাকে)
+        run: |
+          shopt -s nullglob
+          for z in *.zip; do
+            d="_inputs/$(basename "$z" .zip)"
+            mkdir -p "$d" && unzip -q -o "$z" -d "$d"
+            echo "unzipped $z -> $d"
+          done
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: gradle
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ inputs.gradle_version }}
+
+      - run: pip install requests
+
+      - name: Git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Write converter script
+        run: |
+          mkdir -p "$RUNNER_TEMP/ai"
+          cat > "$RUNNER_TEMP/ai/ai_convert.py" <<'PYEOF'
+          #!/usr/bin/env python3
+          """AI_CONVERSION_GUIDE.md অনুযায়ী React -> Kotlin কনভার্সন, ধাপে ধাপে। আউটপুট: final/"""
+          import fnmatch, json, os, pathlib, re, shutil, subprocess, sys, time
+          import requests
+
+          ROOT = pathlib.Path(os.environ.get("GITHUB_WORKSPACE", ".")).resolve()
+          FINAL = ROOT / os.environ.get("FINAL_DIR", "final")
+          API_URL = os.environ.get("LLM_BASE_URL", "https://api.llmsrelay.com").rstrip("/") + "/v1/messages"
+          API_KEY = os.environ.get("LLM_API_KEY", "")
+          MODEL = os.environ.get("LLM_MODEL", "claude-opus-5-5")
+          MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "32000"))
+          MAX_CONT = int(os.environ.get("MAX_CONT", "6"))
+          MAX_FIX = int(os.environ.get("MAX_FIX", "3"))
+          DEADLINE = time.time() + int(os.environ.get("DEADLINE_MIN", "320")) * 60
+          DRY = os.environ.get("DRY_RUN", "false").lower() == "true"
+          STREAM = os.environ.get("STREAM", "true").lower() == "true"
+          CONTINUE_ON_FAIL = os.environ.get("CONTINUE_ON_FAIL", "false").lower() == "true"
+          INCLUDE_OPTIONAL = os.environ.get("INCLUDE_OPTIONAL", "false").lower() == "true"
+          BUILD_CMD = os.environ.get("BUILD_CMD", "gradle :app:assembleDebug --console=plain")
+          SKIP = {s.strip().lower() for s in os.environ.get("SKIP_STEPS", "").split(",") if s.strip()}
+          ONLY = {s.strip().lower() for s in os.environ.get("ONLY_STEPS", "").split(",") if s.strip()}
+
+          NEVER_SEND = {"guideImages.js"}      # ৪০KB ইমেজ ডেটা: মডেলের কাজে আসে না
+          OPTIONAL_FILES = {"guideScenes.js"}  # গাইডে "পরে/ঐচ্ছিক"
+          KT_PKG = "app/src/main/kotlin/com/srizwan/task"
+
+
+          def log(*a):
+              print(*a, flush=True)
+
+
+          # ───────────────────────── ইনপুট খোঁজা ─────────────────────────
+          def walk(maxdepth=4):
+              for dp, dn, fn in os.walk(ROOT):
+                  depth = len(pathlib.Path(dp).relative_to(ROOT).parts)
+                  if depth >= maxdepth:
+                      dn[:] = []
+                  else:
+                      dn[:] = [d for d in dn if d not in (".git", "node_modules", "build", ".gradle", "__MACOSX")
+                               and not (depth == 0 and d == FINAL.name)]
+                  yield pathlib.Path(dp), dn, fn
+
+
+          def pick(cands):
+              cands = sorted(cands, key=lambda p: ("_inputs" in p.parts, len(p.parts)))
+              return cands[0] if cands else None
+
+
+          def find_inputs():
+              guide, react, kotlin = [], [], []
+              for dp, _, fn in walk():
+                  for f in fn:
+                      if fnmatch.fnmatch(f, "*AI_CONVERSION_GUIDE*.md"):
+                          guide.append(dp / f)
+                  if "package.json" in fn and (dp / "src" / "pages").is_dir():
+                      react.append(dp)
+                  if "settings.gradle.kts" in fn and (dp / "app/src/main/kotlin").is_dir():
+                      kotlin.append(dp)
+              g = pathlib.Path(os.environ["GUIDE_FILE"]) if os.environ.get("GUIDE_FILE") else pick(guide)
+              r = pathlib.Path(os.environ["REACT_DIR"]) if os.environ.get("REACT_DIR") else pick(react)
+              k = pathlib.Path(os.environ["KOTLIN_DIR"]) if os.environ.get("KOTLIN_DIR") else pick(kotlin)
+              for name, v in (("AI_CONVERSION_GUIDE.md", g), ("React প্রজেক্ট", r), ("Kotlin প্রজেক্ট", k)):
+                  if not v:
+                      sys.exit(f"❌ {name} রিপোতে পাওয়া যায়নি")
+              return (ROOT / g).resolve(), (ROOT / r).resolve(), (ROOT / k).resolve()
+
+
+          GUIDE_PATH, REACT_DIR, KOTLIN_BASE = find_inputs()
+          REACT_SRC = REACT_DIR / "src"
+          REACT_INDEX = sorted(p.relative_to(REACT_SRC).as_posix() for p in REACT_SRC.rglob("*")
+                               if p.is_file() and p.suffix in (".js", ".jsx", ".css", ".json"))
+
+
+          # ───────────────────────── গাইড পার্স ─────────────────────────
+          def parse_units(md):
+              sections, cur = [], None
+              for ln in md.split("\n"):
+                  m = re.match(r"^###\s+ধাপ\s+(\d+)\s*[:：]?\s*(.*)", ln)
+                  if m:
+                      cur = {"step": int(m.group(1)), "title": ln.strip("# ").strip(), "lines": [ln]}
+                      sections.append(cur)
+                  elif re.match(r"^##\s", ln):
+                      cur = None
+                  elif cur is not None:
+                      cur["lines"].append(ln)
+              units = []
+              for s in sections:
+                  text = "\n".join(s["lines"]).rstrip().rstrip("-").rstrip()
+                  done_mark = "✅" in s["title"]
+                  rows = [re.match(r"^\|\s*(\d+[a-z])\.\s*([^|]*)\|([^|]*)\|([^|]*)\|", l) for l in s["lines"]]
+                  rows = [r for r in rows if r]
+                  if rows:
+                      for r in rows:
+                          units.append(dict(id=r.group(1), step=s["step"], title=f"{s['title']} / {r.group(1)}. {r.group(2).strip()}",
+                                            text=text, files=tokens(r.group(3)), done_mark=done_mark))
+                  else:
+                      fl = " ".join(l for l in s["lines"] if "React ফাইল" in l)
+                      units.append(dict(id=str(s["step"]), step=s["step"], title=s["title"], text=text,
+                                        files=tokens(fl), done_mark=done_mark))
+              return units
+
+
+          def tokens(s):
+              return [t for t in re.findall(r"`([^`]+)`", s) if re.fullmatch(r"[\w./-]+\.(?:jsx?|css|json)", t)]
+
+
+          def resolve(toks):
+              out, skipped = [], []
+              for t in toks:
+                  base = t.split("/")[-1]
+                  if base in NEVER_SEND or (base in OPTIONAL_FILES and not INCLUDE_OPTIONAL):
+                      skipped.append(base)
+                      continue
+                  c = [f for f in REACT_INDEX if f == t or f.endswith("/" + t)]
+                  if not c:
+                      log(f"  ⚠ React ফাইল পাওয়া যায়নি: {t}")
+                  out += [f for f in c if f not in out]
+              return out, skipped
+
+
+          # ───────────────────────── Kotlin কনটেক্সট ─────────────────────────
+          def init_final():
+              if (FINAL / "settings.gradle.kts").exists():
+                  return
+              log(f"final/ ফাঁকা — {KOTLIN_BASE.name} থেকে বেস কপি হচ্ছে")
+              shutil.copytree(KOTLIN_BASE, FINAL, dirs_exist_ok=True,
+                              ignore=shutil.ignore_patterns(".github", "build", ".gradle", ".git", "local.properties"))
+              gi = FINAL / ".gitignore"
+              cur = gi.read_text() if gi.exists() else ""
+              for line in ("build/", ".gradle/", "local.properties"):
+                  if line not in cur.split():
+                      cur += ("\n" if cur and not cur.endswith("\n") else "") + line + "\n"
+              gi.write_text(cur)
+
+
+          def project_files():
+              return sorted(p.relative_to(FINAL).as_posix() for p in FINAL.rglob("*")
+                            if p.is_file() and not any(x in p.parts for x in ("build", ".gradle", ".git")))
+
+
+          DECL = re.compile(r"^\s{0,4}(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|internal|public|data|sealed|enum|open|abstract|suspend|inline|const)\s+)*"
+                            r"(?:fun|class|object|interface)\s+.*")
+
+
+          def outline(text):
+              return "\n".join(l.rstrip()[:160] for l in text.split("\n") if DECL.match(l))
+
+
+          def kotlin_context(extra=()):
+              files = project_files()
+              full = [f for f in files if f in ("app/build.gradle.kts", "build.gradle.kts", "app/src/main/AndroidManifest.xml",
+                                                "local.properties.example")
+                      or f.endswith(("/Theme.kt", "/MainActivity.kt", "/Session.kt")) or "/data/" in f or f in extra]
+              parts = ["## ফাইল ট্রি\n" + "\n".join(files)]
+              for f in full:
+                  parts.append(f"--- {f} ---\n{(FINAL / f).read_text(errors='replace')}")
+              for f in files:
+                  if f.endswith(".kt") and f not in full:
+                      parts.append(f"--- {f} (শুধু ডিক্লারেশন) ---\n{outline((FINAL / f).read_text(errors='replace'))}")
+              return "\n\n".join(parts)
+
+
+          # ───────────────────────── প্রম্পট ─────────────────────────
+          SYS = """তুমি একজন সিনিয়র Android ডেভেলপার। কাজটা স্বয়ংক্রিয় CI পাইপলাইনে চলছে — মাঝখানে কোনো মানুষ উত্তর দেবে না, তাই প্রশ্ন করো না। কিছু অস্পষ্ট হলে সবচেয়ে যুক্তিসঙ্গত সিদ্ধান্ত নাও এবং শেষ নোটে এক লাইনে লেখো।
+
+          নিচের গাইডের সব নিয়ম মানো (বাংলা UI টেক্সট, ভ্যালিডেশন, এরর মেসেজ ও API কল হুবহু; কোড ছোট করা নিষেধ; "বাকিটা আগের মতো" নিষেধ; কোনো সিক্রেট হার্ডকোড নয়)। শুধু আউটপুট ফরম্যাট এই পাইপলাইনের জন্য এমন:
+
+          1. যে ফাইলই বানাও বা বদলাও (MainActivity.kt, app/build.gradle.kts, AndroidManifest.xml, Theme.kt, local.properties.example সহ) তা **পূর্ণ আকারে** দাও — "শুধু বদলের অংশ" নয়। পাথ প্রজেক্ট রুট (final/) থেকে। ফরম্যাট ঠিক এমন, markdown ``` ব্যবহার করবে না:
+          === FILE: app/src/main/kotlin/com/srizwan/task/Example.kt ===
+          <ফাইলের পূর্ণ কন্টেন্ট>
+          === END FILE ===
+          2. React প্রজেক্টের বাইনারি অ্যাসেট (ফন্ট/ছবি) লাগলে এভাবে কপি করাও (পাথ React প্রজেক্ট রুট থেকে):
+          === COPY: public/fonts/Noorehuda.ttf -> app/src/main/res/font/noorehuda.ttf ===
+          3. ফাইলগুলোর পরে শেষ লাইনে: ✅ শেষ: ___ | পরের ধাপ: ___ — আর আগে ২-৪ লাইনের ছোট নোট (কোন ফাংশন কোন ফাইলে গেল, কী ধরে নিলে)। এর বেশি ব্যাখ্যা নয়।
+          4. বিল্ড অবশ্যই পাস করতে হবে: Kotlin 2.2.21, AGP 9.4.0, Compose BOM 2025.10.00, minSdk 26, compileSdk 36, package com.srizwan.task। নতুন dependency লাগলে পূর্ণ app/build.gradle.kts দাও এবং শুধু সত্যিই বিদ্যমান স্থিতিশীল ভার্সন ব্যবহার করো। নতুন HTTP লাইব্রেরি না এনে বিদ্যমান data/Api.kt ব্যবহার করো।
+          5. নতুন কনফিগ মান লাগলে app/build.gradle.kts-এ cfg("KEY") দিয়ে BuildConfig ফিল্ড যোগ করো এবং local.properties.example-ও আপডেট করো। google-services.json রিপোতে নেই, তাই google-services প্লাগিন apply করো না; Firebase লাগলে FirebaseOptions.Builder দিয়ে রানটাইমে init করো, মান BuildConfig থেকে (FB_API_KEY, FB_APP_ID, FB_DB_URL, FB_PROJECT_ID)।
+          6. যে স্ক্রিন/রুট পরের ধাপে হবে তার জন্য PlaceholderScreen রাখো যাতে বিল্ড না ভাঙে। MainActivity-র Routes ও NavHost এই ধাপের জন্য আপডেট করো (কার্ডের "MainActivity-তে" নির্দেশ অনুযায়ী)।
+          7. যে React ফাইল তোমাকে দেওয়া হয়নি তা অনুমান করে লিখো না; "দেওয়া হয়নি" বলা ফাইলের জায়গায় ছোট, বিল্ড-নিরাপদ সরল বিকল্প রাখো।"""
+
+
+          def system_blocks(guide):
+              return [{"type": "text", "text": SYS + "\n\n# AI_CONVERSION_GUIDE.md\n\n" + guide,
+                       "cache_control": {"type": "ephemeral"}}]
+
+
+          def react_blocks(files):
+              return "\n\n".join(f"--- src/{f} ---\n{(REACT_SRC / f).read_text(errors='replace')}" for f in files)
+
+
+          def unit_prompt(u, files, skipped):
+              note = ""
+              if skipped:
+                  note = "\n\nদেওয়া হয়নি (ইচ্ছা করে বাদ): " + ", ".join(skipped) + " — এগুলোর বিকল্প সরল রাখো।"
+              return (f"# এখন করো: {u['title']}\n\nশুধু উপ-ধাপ **{u['id']}** করো, অন্য উপ-ধাপ নয়।\n\n"
+                      f"## গাইডের কার্ড\n{u['text']}\n\n"
+                      f"## এই ধাপের React ফাইল\n{react_blocks(files)}{note}\n\n"
+                      f"# আমার বর্তমান Kotlin প্রজেক্ট (final/)\n{kotlin_context()}\n\n"
+                      f"এখন {u['id']} এর সব ফাইল পূর্ণ আকারে দাও।")
+
+
+          def fix_prompt(u, errlog, files_written):
+              extra = set(files_written) | set(m for m in re.findall(r"(app/src/\S+?\.(?:kt|xml))", errlog))
+              extra = {f for f in extra if (FINAL / f).exists()}
+              return (f"উপ-ধাপ {u['id']} ({u['title']}) এর পর Gradle বিল্ড ফেইল করেছে।\n\n## বিল্ড এরর\n{errlog}\n\n"
+                      f"# বর্তমান Kotlin প্রজেক্ট (final/)\n{kotlin_context(extra)}\n\n"
+                      "শুধু যে ফাইলগুলো ঠিক করতে হবে সেগুলো পূর্ণ আকারে দাও (FILE ফরম্যাটে)। আগের ফিচার/টেক্সট বাদ দেবে না। "
+                      "ভুল ডিপেন্ডেন্সি হলে app/build.gradle.kts ঠিক করো।")
+
+
+          # ───────────────────────── API ─────────────────────────
+          class ApiError(Exception):
+              pass
+
+
+          def call(messages, system, stream):
+              body = {"model": MODEL, "max_tokens": MAX_TOKENS, "system": system, "messages": messages, "stream": stream}
+              h = {"x-api-key": API_KEY, "authorization": f"Bearer {API_KEY}", "anthropic-version": "2023-06-01",
+                   "content-type": "application/json"}
+              r = requests.post(API_URL, headers=h, json=body, stream=stream, timeout=(30, 900))
+              if r.status_code != 200:
+                  raise ApiError(f"{r.status_code}: {r.text[:400]}")
+              if not stream:
+                  d = r.json()
+                  txt = "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text")
+                  return txt, d.get("stop_reason"), d.get("usage", {})
+              text, stop, usage = [], None, {}
+              r.encoding = "utf-8"
+              for line in r.iter_lines(decode_unicode=True):
+                  if not line or not line.startswith("data:"):
+                      continue
+                  data = line[5:].strip()
+                  if data == "[DONE]":
+                      break
+                  ev = json.loads(data)
+                  t = ev.get("type")
+                  if t == "content_block_delta" and ev["delta"].get("type") == "text_delta":
+                      text.append(ev["delta"]["text"])
+                  elif t == "message_start":
+                      usage.update(ev.get("message", {}).get("usage", {}))
+                  elif t == "message_delta":
+                      stop = ev["delta"].get("stop_reason") or stop
+                      usage.update(ev.get("usage", {}))
+                  elif t == "error":
+                      raise ApiError("stream error: " + json.dumps(ev)[:400])
+              return "".join(text), stop, usage
+
+
+          def call_retry(messages, system):
+              stream = STREAM
+              for n in range(6):
+                  try:
+                      return call(messages, system, stream)
+                  except ApiError as e:
+                      code = str(e).split(":")[0]
+                      if stream and code in ("400", "404", "405"):
+                          log("  stream কাজ করেনি, non-stream-এ ফিরছি:", str(e)[:150])
+                          stream = False
+                          continue
+                      if code not in ("408", "409", "429", "500", "502", "503", "504", "529", "stream error"):
+                          raise
+                      err = e
+                  except (requests.RequestException, json.JSONDecodeError) as e:
+                      err = e
+                  wait = min(15 * 2 ** n, 240)
+                  log(f"  API সমস্যা ({str(err)[:120]}) — {wait}s পরে আবার")
+                  time.sleep(wait)
+              raise ApiError("বারবার API ফেইল")
+
+
+          def generate(messages, system):
+              full, msgs = "", list(messages)
+              for i in range(MAX_CONT + 1):
+                  text, stop, usage = call_retry(msgs, system)
+                  full += text
+                  log(f"  ← {len(text):,} অক্ষর | stop={stop} | usage={ {k: v for k, v in usage.items() if isinstance(v, int)} }")
+                  if stop != "max_tokens":
+                      return full
+                  msgs = list(messages) + [{"role": "assistant", "content": full.rstrip()},
+                                           {"role": "user", "content": "আউটপুট কেটে গেছে। ঠিক যেখানে থেমেছিলে সেই জায়গা থেকে হুবহু চালিয়ে যাও। আগের কিছু পুনরাবৃত্তি বা ভূমিকা লিখো না।"}]
+              raise RuntimeError("আউটপুট অনেক লম্বা, MAX_CONT শেষ")
+
+
+          # ───────────────────────── আউটপুট লেখা ─────────────────────────
+          FILE_RE = re.compile(r"^=== FILE: (.+?) ===[ \t]*\n(.*?)\n=== END FILE ===", re.S | re.M)
+          COPY_RE = re.compile(r"^=== COPY: (.+?) -> (.+?) ===", re.M)
+
+
+          def safe(rel):
+              p = pathlib.PurePosixPath(rel.strip().replace("\\", "/"))
+              if p.is_absolute() or ".." in p.parts or not p.parts or p.parts[0] in (".github", ".git"):
+                  raise ValueError(f"অনিরাপদ পাথ: {rel}")
+              return FINAL / p
+
+
+          def strip_fence(body):
+              lines = body.split("\n")
+              if lines and lines[0].startswith("```") and lines[-1].strip() == "```":
+                  return "\n".join(lines[1:-1])
+              return body
+
+
+          def apply_output(out):
+              if out.count("=== FILE:") != len(FILE_RE.findall(out)):
+                  raise RuntimeError("কোনো ফাইল ব্লক অসম্পূর্ণ (END FILE নেই)")
+              written = []
+              for m in FILE_RE.finditer(out):
+                  dest = safe(m.group(1))
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  dest.write_text(strip_fence(m.group(2)).rstrip("\n") + "\n", encoding="utf-8")
+                  written.append(dest.relative_to(FINAL).as_posix())
+              for m in COPY_RE.finditer(out):
+                  src = (REACT_DIR / m.group(1).strip()).resolve()
+                  if REACT_DIR not in src.parents or not src.is_file():
+                      log(f"  ⚠ COPY সোর্স নেই: {m.group(1)}")
+                      continue
+                  dest = safe(m.group(2))
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(src, dest)
+                  written.append(dest.relative_to(FINAL).as_posix())
+              if not written:
+                  raise RuntimeError("আউটপুটে কোনো ফাইল নেই")
+              log("  লেখা হলো:", ", ".join(written))
+              return written
+
+
+          # ───────────────────────── বিল্ড ─────────────────────────
+          def build():
+              log(f"  🔨 {BUILD_CMD}")
+              p = subprocess.run(BUILD_CMD, shell=True, cwd=FINAL, capture_output=True, text=True, timeout=45 * 60)
+              out = p.stdout + "\n" + p.stderr
+              if p.returncode == 0:
+                  log("  ✅ বিল্ড পাস")
+                  return True, ""
+              lines = out.split("\n")
+              errs = [l for l in lines if l.startswith("e: ") or "error:" in l.lower() and "AAPT" in l or "Unresolved" in l]
+              wrong = []
+              for i, l in enumerate(lines):
+                  if "What went wrong" in l:
+                      wrong = lines[i:i + 14]
+                      break
+              errlog = "\n".join(errs[:80] + wrong) or "\n".join(lines[-80:])
+              log("  ❌ বিল্ড ফেইল\n" + "\n".join(errlog.split("\n")[:25]))
+              return False, errlog[:12000]
+
+
+          # ───────────────────────── git / progress ─────────────────────────
+          def sh(cmd, check=True):
+              return subprocess.run(cmd, shell=True, cwd=ROOT, check=check, capture_output=True, text=True)
+
+
+          def commit(msg):
+              if DRY:
+                  return
+              sh(f'git add -A "{FINAL.name}" "{GUIDE_PATH.relative_to(ROOT)}"', check=False)
+              if sh("git diff --cached --quiet", check=False).returncode == 0:
+                  return
+              subprocess.run(["git", "commit", "-q", "-m", msg], cwd=ROOT, check=True, capture_output=True, text=True)
+              for _ in range(4):
+                  if sh("git pull -q --rebase --autostash", check=False).returncode == 0 and \
+                     sh("git push -q", check=False).returncode == 0:
+                      return
+                  time.sleep(5)
+              log("  ⚠ push হয়নি (পরের কমিটে যাবে)")
+
+
+          PROG = FINAL / ".ai-progress.json"
+
+
+          def load_prog():
+              return json.loads(PROG.read_text()) if PROG.exists() else {"done": [], "notes": {}, "failed": []}
+
+
+          def save_prog(p):
+              PROG.parent.mkdir(parents=True, exist_ok=True)
+              PROG.write_text(json.dumps(p, ensure_ascii=False, indent=2))
+              lines = ["# কনভার্সন রিপোর্ট\n"] + [f"- **{k}** — {v}" for k, v in p["notes"].items()]
+              if p["failed"]:
+                  lines += ["\n## ❌ ফেইল", *[f"- {f}" for f in p["failed"]]]
+              (FINAL / "CONVERSION_REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+          def tick_guide(step, units, prog):
+              ids = [u["id"] for u in units if u["step"] == step]
+              if all(i in prog["done"] or i in SKIP or str(step) in SKIP for i in ids):
+                  t = GUIDE_PATH.read_text(encoding="utf-8")
+                  t2 = re.sub(rf"^(\|\s*{step}\s*\|[^\n]*\|\s*)☐(\s*\|\s*)$", r"\1✅\2", t, flags=re.M)
+                  if t2 != t:
+                      GUIDE_PATH.write_text(t2, encoding="utf-8")
+
+
+          def set_output(k, v):
+              if os.environ.get("GITHUB_OUTPUT"):
+                  with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                      f.write(f"{k}={v}\n")
+
+
+          # ───────────────────────── মূল ─────────────────────────
+          def run_unit(u, files, skipped, guide):
+              system = system_blocks(guide)
+              first = [{"role": "user", "content": unit_prompt(u, files, skipped)}]
+              log(f"  প্রম্পট ≈ {len(first[0]['content']):,} অক্ষর")
+              out, written = None, []
+              for attempt in range(2):
+                  out = generate(first, system)
+                  try:
+                      written = apply_output(out)
+                      break
+                  except (RuntimeError, ValueError) as e:
+                      log(f"  ⚠ {e}" + (" — আবার চেষ্টা" if attempt == 0 else ""))
+                      if attempt == 1:
+                          return False, "", "আউটপুট পার্স হয়নি"
+              note = next((l for l in reversed(out.split("\n")) if "✅ শেষ" in l), "")
+              ok, errlog = build()
+              for r in range(MAX_FIX):
+                  if ok:
+                      break
+                  log(f"  🔧 ফিক্স রাউন্ড {r + 1}/{MAX_FIX}")
+                  try:
+                      written = apply_output(generate([{"role": "user", "content": fix_prompt(u, errlog, written)}], system))
+                  except (RuntimeError, ValueError) as e:
+                      log(f"  ⚠ ফিক্স আউটপুট বাতিল: {e}")
+                      continue
+                  ok, errlog = build()
+              return ok, errlog, note.strip()
+
+
+          def main():
+              guide = GUIDE_PATH.read_text(encoding="utf-8")
+              log(f"গাইড: {GUIDE_PATH.relative_to(ROOT)} | React: {REACT_DIR.relative_to(ROOT)} | Kotlin বেস: {KOTLIN_BASE.relative_to(ROOT)}")
+              units = parse_units(guide)
+              if not units:
+                  sys.exit("❌ গাইডে কোনো ধাপ পাওয়া যায়নি")
+              init_final()
+              prog = load_prog()
+              queue = []
+              for u in units:
+                  uid, st = u["id"].lower(), str(u["step"])
+                  if ONLY and uid not in ONLY and st not in ONLY:
+                      continue
+                  if uid in SKIP or st in SKIP or (u["done_mark"] and not ONLY) or u["id"] in prog["done"]:
+                      continue
+                  queue.append(u)
+              log("বাকি ইউনিট:", ", ".join(u["id"] for u in queue) or "কিছু না")
+
+              if DRY:
+                  for u in queue:
+                      files, skipped = resolve(u["files"])
+                      size = sum((REACT_SRC / f).stat().st_size for f in files)
+                      log(f"[{u['id']}] {u['title']}\n    React ফাইল ({size:,} bytes): {files}\n    বাদ: {skipped}")
+                  log("প্রম্পট নমুনা সাইজ:", len(unit_prompt(queue[0], *resolve(queue[0]["files"]))) if queue else 0)
+                  return
+
+              if not API_KEY:
+                  sys.exit("❌ LLM_API_KEY সিক্রেট সেট করা নেই")
+
+              if not prog["done"] and not os.environ.get("SKIP_BASELINE"):
+                  log("▶ বেসলাইন বিল্ড")
+                  ok, errlog = build()
+                  if not ok:
+                      log("  বেস ভাঙা — ঠিক করার চেষ্টা")
+                      u0 = dict(id="baseline", title="বেসলাইন বিল্ড ঠিক করা")
+                      for r in range(MAX_FIX):
+                          apply_output(generate([{"role": "user", "content": fix_prompt(u0, errlog, [])}], system_blocks(guide)))
+                          ok, errlog = build()
+                          if ok:
+                              break
+                      if not ok:
+                          sys.exit("❌ বেস প্রজেক্টই বিল্ড হচ্ছে না")
+                      commit("ai: baseline build fix")
+
+              for i, u in enumerate(queue):
+                  if time.time() > DEADLINE:
+                      log("⏱ সময়সীমা শেষ — বাকিটা পরের রানে")
+                      set_output("remaining", "true")
+                      return
+                  log(f"\n══════ [{u['id']}] {u['title']} ══════")
+                  files, skipped = resolve(u["files"])
+                  ok, errlog, note = run_unit(u, files, skipped, guide)
+                  if ok:
+                      prog["done"].append(u["id"])
+                      prog["notes"][u["id"]] = note or "শেষ"
+                      tick_guide(u["step"], units, prog)
+                      save_prog(prog)
+                      commit(f"ai: {u['id']} {u['title'][:60]}")
+                  else:
+                      prog["failed"].append(f"{u['id']}: {errlog[:300]}".replace("\n", " "))
+                      save_prog(prog)
+                      commit(f"ai: {u['id']} WIP (build failing)")
+                      if not CONTINUE_ON_FAIL:
+                          log(f"🛑 {u['id']} ফেইল — থামছি। কমিট করা হয়েছে; দেখে ঠিক করে আবার চালান।")
+                          set_output("remaining", "false")
+                          sys.exit(1)
+              set_output("remaining", "false")
+              log("\n🎉 সব ধাপ শেষ")
+
+
+          if __name__ == "__main__":
+              main()
+          PYEOF
+
+      - name: Run conversion (guide অনুযায়ী ধাপে ধাপে)
+        id: run
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: https://api.llmsrelay.com
+          LLM_MODEL: ${{ inputs.model }}
+          SKIP_STEPS: ${{ inputs.skip_steps }}
+          ONLY_STEPS: ${{ inputs.only_steps }}
+          MAX_FIX: ${{ inputs.max_fix }}
+          INCLUDE_OPTIONAL: ${{ inputs.include_optional }}
+          CONTINUE_ON_FAIL: ${{ inputs.continue_on_fail }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          FINAL_DIR: final
+          DEADLINE_MIN: "320"
+          MAX_TOKENS: "32000"
+          # বিল্ডের জন্য (app/build.gradle.kts এর cfg() এগুলো env থেকে পড়ে)
+          SB_URL: ${{ secrets.SB_URL }}
+          SB_KEY: ${{ secrets.SB_KEY }}
+          ADMIN_PHONE: ${{ secrets.ADMIN_PHONE }}
+          ADMIN_WA: ${{ secrets.ADMIN_WA }}
+          FB_API_KEY: ${{ secrets.FB_API_KEY }}
+          FB_APP_ID: ${{ secrets.FB_APP_ID }}
+          FB_DB_URL: ${{ secrets.FB_DB_URL }}
+          FB_PROJECT_ID: ${{ secrets.FB_PROJECT_ID }}
+        run: python -I "$RUNNER_TEMP/ai/ai_convert.py"
+
+      - name: Upload APK
+        if: always() && inputs.dry_run != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: final/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
+
+      - name: Continue in a new run (সময় শেষ হলে)
+        if: success() && steps.run.outputs.remaining == 'true' && inputs.auto_continue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run "${{ github.workflow }}" --ref "${{ github.ref_name }}" \
+            -f skip_steps="${{ inputs.skip_steps }}" -f only_steps="${{ inputs.only_steps }}" \
+            -f model="${{ inputs.model }}" -f max_fix="${{ inputs.max_fix }}" \
+            -f include_optional=${{ inputs.include_optional }} -f continue_on_fail=${{ inputs.continue_on_fail }} \
+            -f auto_continue=true -f gradle_version="${{ inputs.gradle_version }}"
