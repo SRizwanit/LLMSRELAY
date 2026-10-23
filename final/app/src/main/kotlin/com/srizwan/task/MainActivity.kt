@@ -30,6 +30,8 @@ object Routes {
     const val LOGIN = "login"
     const val SIGNUP = "signup"
     const val TASK = "task"
+    const val PROFILE = "profile"
+    const val ADMIN = "admin"
 }
 
 class MainActivity : ComponentActivity() {
@@ -80,7 +82,11 @@ private fun AppNav() {
                 }
             )
         }
-        composable(Routes.TASK) { PlaceholderScreen("টাস্ক") }
+        composable(Routes.TASK) {
+            TaskScreen(navController = nav)
+        }
+        composable(Routes.PROFILE) { PlaceholderScreen("প্রোফাইল") }
+        composable(Routes.ADMIN) { PlaceholderScreen("অ্যাডমিন") }
     }
 }
 
