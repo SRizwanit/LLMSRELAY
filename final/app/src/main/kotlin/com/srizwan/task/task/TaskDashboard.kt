@@ -25,12 +25,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.srizwan.task.AppColors
-import com.srizwan.task.R
 import com.srizwan.task.TaskState
 import org.json.JSONObject
 
@@ -83,10 +81,9 @@ fun TaskDashboard(
                     .padding(16.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        painter = painterResource(R.drawable.rizwantask),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                    Text(
+                        text = "📖",
+                        fontSize = 32.sp,
                         modifier = Modifier.size(32.dp)
                     )
                     Spacer(Modifier.width(12.dp))
@@ -115,6 +112,7 @@ private fun GoalCard(today: Int, goal: Int, hit: Boolean, pct: Float, left: Int,
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onGoal)
             .padding(16.dp)
     ) {
         Column {
@@ -243,7 +241,7 @@ fun resumeTarget(resume: JSONObject?, booksById: Map<String, JSONObject>, proofs
     val name = resume.optString("name", "")
     val done = proofs.count { it.optString("book_id") == id }
     val total = resume.optInt("total_pages", 0)
-    val stem = "$name · পেইজ ${bn(done + 1)}/$total"
+    val stem = "$name · পেইজ ${bnInt(done + 1)}/${bnInt(total)}"
     return ResumeTarget(resume, stem)
 }
 
@@ -295,6 +293,11 @@ private fun daysBetween(a: String, b: String): Long {
 }
 
 private fun bn(n: Int): String {
+    val digits = "০১২৩৪৫৬৭৮৯"
+    return n.toString().map { if (it.isDigit()) digits[it - '0'] else it }.joinToString("")
+}
+
+private fun bnInt(n: Int): String {
     val digits = "০১২৩৪৫৬৭৮৯"
     return n.toString().map { if (it.isDigit()) digits[it - '0'] else it }.joinToString("")
 }

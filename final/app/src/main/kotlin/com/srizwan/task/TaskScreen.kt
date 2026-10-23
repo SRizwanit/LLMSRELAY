@@ -154,8 +154,6 @@ private fun TaskBottomNav(tab: TaskTab, vm: TaskViewModel) {
 
 @Composable
 private fun TaskPane(state: TaskState, vm: TaskViewModel, navController: NavController) {
-    val context = LocalContext.current
-    
     when (state.tab) {
         TaskTab.TASK -> {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -220,9 +218,4 @@ private fun TaskPane(state: TaskState, vm: TaskViewModel, navController: NavCont
             )
         }
     }
-}
-
-private fun bn(n: Int): String {
-    val digits = "০১২৩৪৫৬৭৮৯"
-    return n.toString().map { if (it.isDigit()) digits[it - '0'] else it }.joinToString("")
 }

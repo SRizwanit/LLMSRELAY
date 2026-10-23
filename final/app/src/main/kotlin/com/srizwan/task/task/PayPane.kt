@@ -21,20 +21,18 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.srizwan.task.AppColors
 import com.srizwan.task.R
 import com.srizwan.task.TaskState
@@ -49,6 +47,7 @@ fun PayPane(
     pays: List<JSONObject>
 ) {
     val money = state.money
+    val context = LocalContext.current
     
     LazyColumn(
         modifier = Modifier
@@ -88,20 +87,12 @@ fun PayPane(
                 }
             }
         } else if (money != null) {
-            val sum = PaySum(
-                money.approved,
-                money.pending,
-                money.corrected,
-                money.total,
-                money.canReq
-            )
+            item { PayTiles(money) }
 
-            item { PayTiles(sum) }
-
-            if (sum.canReq) {
+            if (money.canReq) {
                 item {
                     Button(
-                        onClick = { /* vm.requestPayment(context) চাইলে এখানে */ },
+                        onClick = { vm.requestPayment(context) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary
@@ -159,30 +150,21 @@ fun PayPane(
     }
 }
 
-data class PaySum(
-    val approved: Int,
-    val pending: Int,
-    val corrected: Int,
-    val total: Int,
-    val canReq: Boolean
-)
-
 @Composable
-private fun PayTiles(s: PaySum?) {
-    if (s == null) return
+private fun PayTiles(money: com.srizwan.task.FinData) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         PayTile(
             label = "অনুমোদিত",
-            value = money(s.approved),
+            value = money(money.approved),
             color = AppColors.extra.ok,
             modifier = Modifier.weight(1f)
         )
         PayTile(
             label = "পেন্ডিং",
-            value = money(s.pending),
+            value = money(money.pending),
             color = AppColors.extra.warn,
             modifier = Modifier.weight(1f)
         )
@@ -302,7 +284,7 @@ private fun BookEarnItem(b: JSONObject?, x: com.srizwan.task.BookPaySum, rateOf:
                 color = AppColors.extra.muted
             )
             Spacer(Modifier.height(8.dp))
-            SegBar(x.approved, x.pending, x.corrected, x.total)
+            SegBar(x.approved, x.pending, x.cancelled, x.total)
         }
     }
 }
