@@ -3,3 +3,4 @@
 - **2** — ✅ শেষ: Login স্ক্রিন (ফোন, OTP, PIN, ডিভাইস ব্লক ফ্লো) | পরের ধাপ: Signup
 - **3** — শেষ
 - **4a** — ✅ শেষ: TaskScreen কাঠামো (৩টি ট্যাব PlaceholderPane, TopBar myCount ব্যাজসহ, BottomNav) | পরের ধাপ: 4b (Dashboard + BookGrid) — helpers.js-এ PM, KIND, BADGES, streakInfo, goalToast, resumeTarget লজিক TaskViewModel-এ বা নতুন TaskHelpers.kt-এ বানাতে হবে; Dashboard.jsx ও BookGrid.jsx লাগবে
+- **4b** — ✅ শেষ: TaskDashboard.kt ও BookGrid.kt বানানো হয়েছে — দৈনিক লক্ষ্য, টানা দিন, ব্যাজ, "চালিয়ে যান", কিতাবের তালিকা (কভার, অগ্রগতি বার, রেট, "শেষ কাজ" ট্যাগ) ও সার্চ | পরের ধাপ: 4c. পেমেন্ট ট্যাব বা 4d. র‍্যাংক ট্যাব বা 4e. ডায়ালগ (GoalDialog ইত্যাদি) — আপনার নির্দেশ অনুযায়ী। Dashboard-এ onGoal ও onResume এখনো placeholder (আসল লজিক ধাপ 4e ও 7-এ)।
