@@ -666,7 +666,7 @@ jobs:
                   todo = "বাজেট বাড়িয়ে বা ব্যালেন্স টপ-আপ করে workflow আবার চালান। হয়ে যাওয়া ধাপ আবার হবে না।"
               elif kind == "auth":
                   title = "API key ভুল বা অনুমতি নেই (401/403)"
-                  todo = "Settings → Secrets এ LLM_API_KEY ঠিক আছে কি না দেখুন, তারপর আবার চালান।"
+                  todo = "উপরের 'সার্ভারের আসল উত্তর' লাইন দেখুন। key ঠিক থাকলেও 403 হতে পারে যদি key/প্ল্যানে এই মডেলের অনুমতি না থাকে; তখন model ইনপুটে অন্য মডেল (যেমন claude-sonnet-5-5) দিয়ে চালান।"
               else:
                   title = "API বারবার ফেইল করেছে"
                   todo = "কিছুক্ষণ পরে workflow আবার চালান। হয়ে যাওয়া ধাপ আবার হবে না।"
@@ -681,6 +681,7 @@ jobs:
                   commit(f"ai: stopped at {unit or 'start'} ({kind}); progress saved")
               except Exception as ex:
                   log(f"  ⚠ অগ্রগতি সেভ করা যায়নি: {ex}")
+              log(f"  ↳ সার্ভারের আসল উত্তর: {str(e)[:300]}")
               bar = "═" * 60
               log(f"\n{bar}\n⏸ থামছি: {msg}")
               log("✅ শেষ হয়েছে: " + (", ".join(done) or "এখনো কোনো ধাপ নয়"))
