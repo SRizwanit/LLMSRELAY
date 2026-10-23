@@ -39,6 +39,9 @@ on:
         description: "শুধু ধাপ ও ফাইল তালিকা দেখাও (API/বিল্ড নয়)"
         type: boolean
         default: false
+      budget_usd:
+        description: "এই রানে আনুমানিক সর্বোচ্চ খরচ ($). পরের ধাপ বাজেটে না ধরলে শুরুর আগেই সেভ করে থামবে। 0 = সীমা নেই"
+        default: "0"
       gradle_version:
         description: "Gradle ভার্সন"
         default: "9.7.0"
@@ -169,6 +172,17 @@ jobs:
 
 
           # ───────────────────────── গাইড পার্স ─────────────────────────
+          def card_text(lines, keep_id):
+              """টেবিলে একাধিক উপ-ধাপের সারি থাকলে শুধু এই ইউনিটের সারি রাখি; বাকি লাইন অপরিবর্তিত"""
+              out = []
+              for l in lines:
+                  m = re.match(r"^\|\s*(\d+[a-z])\.", l)
+                  if m and m.group(1) != keep_id:
+                      continue
+                  out.append(l)
+              return "\n".join(out).rstrip().rstrip("-").rstrip()
+
+
           def parse_units(md):
               sections, cur = [], None
               for ln in md.split("\n"):
@@ -189,7 +203,7 @@ jobs:
                   if rows:
                       for r in rows:
                           units.append(dict(id=r.group(1), step=s["step"], title=f"{s['title']} / {r.group(1)}. {r.group(2).strip()}",
-                                            text=text, files=tokens(r.group(3)), done_mark=done_mark))
+                                            text=card_text(s["lines"], r.group(1)), files=tokens(r.group(3)), done_mark=done_mark))
                   else:
                       fl = " ".join(l for l in s["lines"] if "React ফাইল" in l)
                       units.append(dict(id=str(s["step"]), step=s["step"], title=s["title"], text=text,
@@ -309,12 +323,24 @@ jobs:
               pass
 
 
+          class FatalApiError(ApiError):
+              """আবার চেষ্টা করে লাভ নেই: ক্রেডিট শেষ / API key ভুল"""
+              def __init__(self, kind, msg):
+                  super().__init__(msg)
+                  self.kind = kind
+
+
           def call(messages, system, stream):
               body = {"model": MODEL, "max_tokens": MAX_TOKENS, "system": system, "messages": messages, "stream": stream}
               h = {"x-api-key": API_KEY, "authorization": f"Bearer {API_KEY}", "anthropic-version": "2023-06-01",
                    "content-type": "application/json"}
               r = requests.post(API_URL, headers=h, json=body, stream=stream, timeout=(30, 900))
               if r.status_code != 200:
+                  low = r.text.lower()
+                  if r.status_code == 402 or "insufficient credit" in low or "billing_error" in low:
+                      raise FatalApiError("credits", f"{r.status_code}: {r.text[:300]}")
+                  if r.status_code in (401, 403):
+                      raise FatalApiError("auth", f"{r.status_code}: {r.text[:300]}")
                   raise ApiError(f"{r.status_code}: {r.text[:400]}")
               if not stream:
                   d = r.json()
@@ -338,7 +364,10 @@ jobs:
                       stop = ev["delta"].get("stop_reason") or stop
                       usage.update(ev.get("usage", {}))
                   elif t == "error":
-                      raise ApiError("stream error: " + json.dumps(ev)[:400])
+                      raw = json.dumps(ev)
+                      if "billing" in raw.lower() or "insufficient" in raw.lower():
+                          raise FatalApiError("credits", "stream: " + raw[:300])
+                      raise ApiError("stream error: " + raw[:400])
               return "".join(text), stop, usage
 
 
@@ -347,6 +376,8 @@ jobs:
               for n in range(6):
                   try:
                       return call(messages, system, stream)
+                  except FatalApiError:
+                      raise
                   except ApiError as e:
                       code = str(e).split(":")[0]
                       if stream and code in ("400", "404", "405"):
@@ -364,12 +395,30 @@ jobs:
               raise ApiError("বারবার API ফেইল")
 
 
+          PRICE_IN = float(os.environ.get("PRICE_IN", "5"))     # $ / 1M ইনপুট টোকেন (আনুমানিক; env দিয়ে বদলানো যায়)
+          PRICE_OUT = float(os.environ.get("PRICE_OUT", "25"))  # $ / 1M আউটপুট টোকেন
+          BUDGET = float(os.environ.get("BUDGET_USD") or 0)     # 0 = সীমা নেই
+          SPEND = {"usd": 0.0}
+          LAST = {"cost": 0.0}
+
+
+          def track(usage):
+              g = lambda k: usage.get(k) if isinstance(usage.get(k), int) else 0
+              i, cr, cc, o = g("input_tokens"), g("cache_read_input_tokens"), g("cache_creation_input_tokens"), g("output_tokens")
+              cost = (i * PRICE_IN + cr * PRICE_IN * 0.1 + cc * PRICE_IN * 1.25 + o * PRICE_OUT) / 1e6
+              SPEND["usd"] += cost
+              tot = i + cr + cc
+              hit = 100 * cr / tot if tot else 0
+              log(f"  💲 এই কল ≈${cost:.3f} | এই রানে মোট ≈${SPEND['usd']:.3f} | cache hit {hit:.0f}% (cache_read {cr:,} / মোট ইনপুট {tot:,}, আউটপুট {o:,})")
+
+
           def generate(messages, system):
               full, msgs = "", list(messages)
               for i in range(MAX_CONT + 1):
                   text, stop, usage = call_retry(msgs, system)
                   full += text
                   log(f"  ← {len(text):,} অক্ষর | stop={stop} | usage={ {k: v for k, v in usage.items() if isinstance(v, int)} }")
+                  track(usage)
                   if stop != "max_tokens":
                       return full
                   msgs = list(messages) + [{"role": "assistant", "content": full.rstrip()},
@@ -461,6 +510,7 @@ jobs:
 
 
           PROG = FINAL / ".ai-progress.json"
+          CURRENT = {"unit": None}
 
 
           def load_prog():
@@ -473,6 +523,8 @@ jobs:
               lines = ["# কনভার্সন রিপোর্ট\n"] + [f"- **{k}** — {v}" for k, v in p["notes"].items()]
               if p["failed"]:
                   lines += ["\n## ❌ ফেইল", *[f"- {f}" for f in p["failed"]]]
+              if p.get("stopped"):
+                  lines += ["\n## ⏸ থেমে আছে", f"- {p['stopped']}"]
               (FINAL / "CONVERSION_REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -521,7 +573,7 @@ jobs:
               return ok, errlog, note.strip()
 
 
-          def main():
+          def _main():
               guide = GUIDE_PATH.read_text(encoding="utf-8")
               log(f"গাইড: {GUIDE_PATH.relative_to(ROOT)} | React: {REACT_DIR.relative_to(ROOT)} | Kotlin বেস: {KOTLIN_BASE.relative_to(ROOT)}")
               units = parse_units(guide)
@@ -529,6 +581,7 @@ jobs:
                   sys.exit("❌ গাইডে কোনো ধাপ পাওয়া যায়নি")
               init_final()
               prog = load_prog()
+              prog.pop("stopped", None)
               queue = []
               for u in units:
                   uid, st = u["id"].lower(), str(u["step"])
@@ -540,11 +593,15 @@ jobs:
               log("বাকি ইউনিট:", ", ".join(u["id"] for u in queue) or "কিছু না")
 
               if DRY:
+                  tot_tok = 0
                   for u in queue:
                       files, skipped = resolve(u["files"])
                       size = sum((REACT_SRC / f).stat().st_size for f in files)
-                      log(f"[{u['id']}] {u['title']}\n    React ফাইল ({size:,} bytes): {files}\n    বাদ: {skipped}")
-                  log("প্রম্পট নমুনা সাইজ:", len(unit_prompt(queue[0], *resolve(queue[0]["files"]))) if queue else 0)
+                      n = len(unit_prompt(u, files, skipped))
+                      tok = int(n * 0.46)  # ধাপ 2 এর আসল লগ থেকে: ≈0.46 টোকেন/অক্ষর
+                      tot_tok += tok
+                      log(f"[{u['id']}] {u['title']}\n    React ফাইল ({size:,} bytes): {files}\n    বাদ: {skipped}\n    প্রম্পট ≈ {n:,} অক্ষর ≈ {tok:,} টোকেন ≈ ${tok * PRICE_IN / 1e6:.2f} (শুধু ইনপুট)")
+                  log(f"\nমোট ইনপুট ≈ {tot_tok:,} টোকেন ≈ ${tot_tok * PRICE_IN / 1e6:.2f}। আউটপুট ও ফিক্স রাউন্ড আলাদা, আর ধাপ এগোলে Kotlin কনটেক্সট বাড়ে, তাই আসল খরচ এর চেয়ে বেশি হবে।")
                   return
 
               if not API_KEY:
@@ -570,9 +627,15 @@ jobs:
                       log("⏱ সময়সীমা শেষ — বাকিটা পরের রানে")
                       set_output("remaining", "true")
                       return
+                  CURRENT["unit"] = u["id"]
+                  if BUDGET and SPEND["usd"] + LAST["cost"] > BUDGET:
+                      raise FatalApiError("budget", f"আনুমানিক খরচ ${SPEND['usd']:.2f}, বাজেট ${BUDGET:.2f}")
                   log(f"\n══════ [{u['id']}] {u['title']} ══════")
                   files, skipped = resolve(u["files"])
+                  before = SPEND["usd"]
                   ok, errlog, note = run_unit(u, files, skipped, guide)
+                  LAST["cost"] = SPEND["usd"] - before
+                  log(f"  📊 ইউনিট {u['id']} মোট ≈${LAST['cost']:.3f}")
                   if ok:
                       prog["done"].append(u["id"])
                       prog["notes"][u["id"]] = note or "শেষ"
@@ -589,6 +652,55 @@ jobs:
                           sys.exit(1)
               set_output("remaining", "false")
               log("\n🎉 সব ধাপ শেষ")
+
+
+          def stop_cleanly(e):
+              """API এরর হলে Traceback নয়: পরিষ্কার মেসেজ, অগ্রগতি সেভ, কমিট, তারপর থামা"""
+              unit = CURRENT["unit"]
+              kind = getattr(e, "kind", "api")
+              if kind == "credits":
+                  title = "ক্রেডিট শেষ (402 Insufficient credits)"
+                  todo = "llmsrelay ড্যাশবোর্ডে ব্যালেন্স টপ-আপ করে workflow আবার চালান। হয়ে যাওয়া ধাপ আবার হবে না।"
+              elif kind == "budget":
+                  title = "বাজেট সীমায় পৌঁছেছি (budget_usd)"
+                  todo = "বাজেট বাড়িয়ে বা ব্যালেন্স টপ-আপ করে workflow আবার চালান। হয়ে যাওয়া ধাপ আবার হবে না।"
+              elif kind == "auth":
+                  title = "API key ভুল বা অনুমতি নেই (401/403)"
+                  todo = "Settings → Secrets এ LLM_API_KEY ঠিক আছে কি না দেখুন, তারপর আবার চালান।"
+              else:
+                  title = "API বারবার ফেইল করেছে"
+                  todo = "কিছুক্ষণ পরে workflow আবার চালান। হয়ে যাওয়া ধাপ আবার হবে না।"
+              where = (f"ধাপ {unit} শুরুর আগে" if kind == "budget" else f"ধাপ {unit} চলার সময়") if unit else "শুরুতেই"
+              msg = f"{title} — {where}। {todo}"
+              done = []
+              try:
+                  prog = load_prog()
+                  done = prog["done"]
+                  prog["stopped"] = f"{unit or 'শুরু'}: {title}"
+                  save_prog(prog)
+                  commit(f"ai: stopped at {unit or 'start'} ({kind}); progress saved")
+              except Exception as ex:
+                  log(f"  ⚠ অগ্রগতি সেভ করা যায়নি: {ex}")
+              bar = "═" * 60
+              log(f"\n{bar}\n⏸ থামছি: {msg}")
+              log("✅ শেষ হয়েছে: " + (", ".join(done) or "এখনো কোনো ধাপ নয়"))
+              if unit and unit not in done:
+                  log(f"↻ পরের রানে ধাপ {unit} থেকে আবার শুরু হবে")
+              log("📦 এ পর্যন্ত কাজ final/ এ কমিট করা আছে; APK (যদি বিল্ড হয়ে থাকে) Artifacts এ পাবেন।\n" + bar)
+              print(f"::error title={title}::{msg}", flush=True)
+              summ = os.environ.get("GITHUB_STEP_SUMMARY")
+              if summ:
+                  with open(summ, "a", encoding="utf-8") as f:
+                      f.write(f"## ⏸ {title}\n\n{msg}\n\n- শেষ হয়েছে: {', '.join(done) or 'কিছু না'}\n")
+              set_output("remaining", "false")  # auto-continue বন্ধ: ক্রেডিট ছাড়া লুপে চলবে না
+              sys.exit(1)
+
+
+          def main():
+              try:
+                  _main()
+              except ApiError as e:
+                  stop_cleanly(e)
 
 
           if __name__ == "__main__":
@@ -610,6 +722,7 @@ jobs:
           FINAL_DIR: final
           DEADLINE_MIN: "320"
           MAX_TOKENS: "32000"
+          BUDGET_USD: ${{ inputs.budget_usd }}
           # বিল্ডের জন্য (app/build.gradle.kts এর cfg() এগুলো env থেকে পড়ে)
           SB_URL: ${{ secrets.SB_URL }}
           SB_KEY: ${{ secrets.SB_KEY }}
@@ -638,4 +751,4 @@ jobs:
             -f skip_steps="${{ inputs.skip_steps }}" -f only_steps="${{ inputs.only_steps }}" \
             -f model="${{ inputs.model }}" -f max_fix="${{ inputs.max_fix }}" \
             -f include_optional=${{ inputs.include_optional }} -f continue_on_fail=${{ inputs.continue_on_fail }} \
-            -f auto_continue=true -f gradle_version="${{ inputs.gradle_version }}"
+            -f auto_continue=true -f gradle_version="${{ inputs.gradle_version }}" -f budget_usd="${{ inputs.budget_usd }}"
