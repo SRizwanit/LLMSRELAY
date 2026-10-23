@@ -1,22 +1,38 @@
 package com.srizwan.task.task
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.srizwan.task.AppColors
+import com.srizwan.task.R
+import com.srizwan.task.TaskState
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.*
 
 data class ResumeTarget(val book: JSONObject, val stem: String)
 
@@ -28,277 +44,194 @@ data class StreakInfo(
 
 @Composable
 fun TaskDashboard(
-    ready: Boolean,
-    me: JSONObject?,
-    books: List<JSONObject>,
-    proofs: List<JSONObject>,
-    booksById: Map<String, JSONObject>,
-    query: String,
-    onQueryChange: (String) -> Unit,
-    goal: Int,
-    resume: ResumeTarget?,
-    rateOf: (JSONObject?) -> Int,
+    state: TaskState,
     onGoal: () -> Unit,
-    onResume: (String, String) -> Unit
+    resume: ResumeTarget?,
+    onResume: (String, Int) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val today = proofs.count {
-        val d = it.optString("created_at", "").take(10)
-        d == SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date())
-    }
+    val pct = if (state.goal > 0) state.todayCount.toFloat() / state.goal else 0f
+    val left = (state.goal - state.todayCount).coerceAtLeast(0)
+    val streak = streakInfo(state.proofs)
 
-    val streak = streakInfo(proofs)
-    val hit = goal > 0 && today >= goal
-    val pct = if (goal > 0) (today.toFloat() / goal).coerceIn(0f, 1f) else 0f
-    val left = maxOf(0, goal - today)
-
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.TopCenter
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-                .widthIn(max = 560.dp)
-        ) {
-            GoalCard(today, goal, hit, pct, left, onGoal)
-            Spacer(Modifier.height(10.dp))
-            StreakCard(streak.current, streak.best, streak.doneToday)
-            Spacer(Modifier.height(14.dp))
-
-            if (resume != null) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+        Spacer(Modifier.height(4.dp))
+        GoalCard(state.todayCount, state.goal, state.goalHit, pct, left, onGoal)
+        StreakCard(streak.current, streak.best, streak.doneToday)
+        
+        if (resume != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .clickable {
+                        val id = resume.book.getString("id")
+                        val done = state.proofs.count { it.optString("book_id") == id }
+                        onResume(id, done + 1)
+                    }
+                    .padding(16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(R.drawable.rizwantask),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "চালিয়ে যান",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "${resume.book.optString("name")} — ${resume.stem}",
-                            fontSize = 13.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             color = AppColors.extra.muted
                         )
-                        Spacer(Modifier.height(10.dp))
-                        Button(
-                            onClick = {
-                                val bookId = resume.book.optInt("id", 0).toString()
-                                onResume(bookId, resume.stem)
-                            },
-                            modifier = Modifier.fillMaxWidth().height(44.dp),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("খুলুন", fontSize = 15.sp)
-                        }
+                        Text(
+                            text = resume.stem,
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
-                Spacer(Modifier.height(14.dp))
             }
-
-            BookGrid(
-                ready = ready,
-                books = books,
-                proofs = proofs,
-                booksById = booksById,
-                query = query,
-                onQueryChange = onQueryChange,
-                resume = resume,
-                rateOf = rateOf,
-                onOpen = onResume
-            )
-
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
 @Composable
 private fun GoalCard(today: Int, goal: Int, hit: Boolean, pct: Float, left: Int, onGoal: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(12.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(16.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     text = "আজকের লক্ষ্য",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
-                TextButton(onClick = onGoal) {
-                    Text("পরিবর্তন", fontSize = 13.sp)
-                }
+                Text(
+                    text = "${bn(today)}/${bn(goal)}",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = if (hit) AppColors.extra.ok else MaterialTheme.colorScheme.primary
+                )
             }
+
+            Spacer(Modifier.height(12.dp))
+
+            LinearProgressIndicator(
+                progress = { pct.coerceIn(0f, 1f) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                color = if (hit) AppColors.extra.ok else MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+
             Spacer(Modifier.height(8.dp))
 
-            if (goal == 0) {
-                Text(
-                    text = "আপনি এখনো কোনো লক্ষ্য ঠিক করেননি। দৈনিক কতটি পেইজ প্রুফড করবেন তা ঠিক করলে কাজে মনোযোগ ও প্রেরণা বজায় থাকবে।",
-                    fontSize = 13.sp,
-                    color = AppColors.extra.muted,
-                    lineHeight = 18.sp
-                )
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Text(
-                        text = "${bn(today)} / ${bn(goal)} পেইজ",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (hit) AppColors.extra.ok else MaterialTheme.colorScheme.onSurface
-                    )
-                    if (!hit && left > 0) {
-                        Text(
-                            text = "আরও ${bn(left)} পেইজ",
-                            fontSize = 13.sp,
-                            color = AppColors.extra.muted
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .background(AppColors.extra.line, RoundedCornerShape(4.dp))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(pct)
-                            .background(
-                                if (hit) AppColors.extra.ok else MaterialTheme.colorScheme.primary,
-                                RoundedCornerShape(4.dp)
-                            )
-                    )
-                }
-
-                if (hit) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "🎉 আজকের লক্ষ্য অর্জন করেছেন!",
-                        fontSize = 13.sp,
-                        color = AppColors.extra.ok,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
+            Text(
+                text = if (hit) "🎉 আজকের লক্ষ্য পূরণ হয়েছে! মাশাআল্লাহ!" else "আরও ${bn(left)} পেইজ বাকি",
+                style = MaterialTheme.typography.bodySmall,
+                color = AppColors.extra.muted
+            )
         }
     }
 }
 
 @Composable
 private fun StreakCard(cur: Int, best: Int, doneToday: Boolean) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(12.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)
+                    )
+                )
+            )
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                RoundedCornerShape(12.dp)
+            )
+            .padding(16.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
                 Text(
                     text = "🔥 টানা দিন",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
-            }
-            Spacer(Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        text = "${bn(cur)} দিন",
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (cur > 0) AppColors.extra.gold else AppColors.extra.muted
-                    )
-                    Text(
-                        text = "বর্তমান",
-                        fontSize = 12.sp,
-                        color = AppColors.extra.muted
-                    )
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "${bn(best)} দিন",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AppColors.extra.muted
-                    )
-                    Text(
-                        text = "সেরা রেকর্ড",
-                        fontSize = 12.sp,
-                        color = AppColors.extra.muted
-                    )
-                }
-            }
-
-            if (cur > 0) {
-                Spacer(Modifier.height(8.dp))
-                BadgeRow(best)
-            }
-
-            if (!doneToday && cur > 0) {
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "⚠️ আজ এখনো কোনো পেইজ প্রুফড করেননি — রেকর্ড বজায় রাখতে আজই কাজ করুন।",
-                    fontSize = 12.sp,
-                    color = AppColors.extra.warn,
-                    lineHeight = 16.sp
+                    text = "${bn(cur)} দিন",
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = if (doneToday) "আজ কমপক্ষে ১টি পেইজ করেছেন" else "আজ এখনো কোনো পেইজ করেননি",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AppColors.extra.muted
                 )
             }
+
+            BadgeRow(best)
         }
     }
 }
 
 @Composable
 private fun BadgeRow(best: Int) {
-    val milestones = listOf(3, 7, 14, 30, 50, 100)
-    val reached = milestones.filter { it <= best }
-
-    if (reached.isNotEmpty()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            reached.forEach { m ->
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = AppColors.extra.gold
-                ) {
-                    Text(
-                        text = "${bn(m)}+ 🏆",
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        fontSize = 11.sp,
-                        color = Color.White,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(7, 30, 100).forEach { m ->
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (best >= m) Brush.linearGradient(
+                            listOf(Color(0xFFa8761f), Color(0xFFf2d27a))
+                        )
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = when (m) {
+                        7 -> "🥉"
+                        30 -> "🥈"
+                        100 -> "🥇"
+                        else -> ""
+                    },
+                    fontSize = 18.sp
+                )
             }
         }
     }
@@ -306,77 +239,62 @@ private fun BadgeRow(best: Int) {
 
 fun resumeTarget(resume: JSONObject?, booksById: Map<String, JSONObject>, proofs: List<JSONObject>): ResumeTarget? {
     if (resume == null) return null
-    val bookId = resume.optInt("book_id", 0).toString()
-    val stem = resume.optString("stem", "")
-    if (bookId == "0" || stem.isEmpty()) return null
-
-    val book = booksById[bookId] ?: return null
-    val total = book.optInt("total_pages", 0)
-    if (total == 0) return null
-
-    val done = proofs.filter { it.optInt("book_id", 0).toString() == bookId }
-    if (done.size >= total) return null
-
-    return ResumeTarget(book = book, stem = stem)
+    val id = resume.optString("id", "")
+    val name = resume.optString("name", "")
+    val done = proofs.count { it.optString("book_id") == id }
+    val total = resume.optInt("total_pages", 0)
+    val stem = "$name · পেইজ ${bn(done + 1)}/$total"
+    return ResumeTarget(resume, stem)
 }
 
 fun streakInfo(proofs: List<JSONObject>): StreakInfo {
     if (proofs.isEmpty()) return StreakInfo(0, 0, false)
 
-    val dates = proofs.mapNotNull { it.optString("created_at", "").take(10).ifEmpty { null } }
-        .distinct()
-        .sorted()
+    val dates = proofs.mapNotNull {
+        it.optString("created_at", "").substringBefore('T').takeIf { d -> d.isNotBlank() }
+    }.distinct().sortedDescending()
 
     if (dates.isEmpty()) return StreakInfo(0, 0, false)
 
-    val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
-    }.format(Date())
-
-    val doneToday = dates.contains(today)
+    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+    val doneToday = dates.firstOrNull() == today
 
     var cur = 0
     var best = 0
-    var streak = 0
-    var prevDate: String? = null
+    var temp = 0
+    var prev: String? = null
 
-    dates.forEach { d ->
-        if (prevDate == null) {
-            streak = 1
+    for (d in dates) {
+        if (prev == null) {
+            temp = 1
         } else {
-            val gap = daysBetween(prevDate!!, d)
-            if (gap == 1L) {
-                streak++
-            } else {
-                streak = 1
-            }
+            val gap = daysBetween(d, prev)
+            temp = if (gap == 1L) temp + 1 else 1
         }
-        best = maxOf(best, streak)
-        prevDate = d
+        if (temp > best) best = temp
+        prev = d
     }
 
-    if (prevDate != null) {
-        val gap = daysBetween(prevDate!!, today)
-        cur = if (gap == 0L) streak else if (gap == 1L && !doneToday) streak else 0
+    cur = if (doneToday) {
+        temp
+    } else {
+        val yesterday = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(
+            java.util.Date(System.currentTimeMillis() - 86400000L)
+        )
+        if (dates.firstOrNull() == yesterday) temp else 0
     }
 
     return StreakInfo(cur, best, doneToday)
 }
 
 private fun daysBetween(a: String, b: String): Long {
-    return try {
-        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
-        val d1 = fmt.parse(a)!!.time
-        val d2 = fmt.parse(b)!!.time
-        (d2 - d1) / 86400000L
-    } catch (e: Exception) {
-        0L
-    }
+    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+    val d1 = fmt.parse(a)?.time ?: 0L
+    val d2 = fmt.parse(b)?.time ?: 0L
+    return ((d2 - d1) / 86400000L)
 }
 
 private fun bn(n: Int): String {
-    val map = mapOf('0' to '০', '1' to '১', '2' to '২', '3' to '৩', '4' to '৪', '5' to '৫', '6' to '৬', '7' to '৭', '8' to '৮', '9' to '৯')
-    return n.toString().map { map[it] ?: it }.joinToString("")
+    val digits = "০১২৩৪৫৬৭৮৯"
+    return n.toString().map { if (it.isDigit()) digits[it - '0'] else it }.joinToString("")
 }

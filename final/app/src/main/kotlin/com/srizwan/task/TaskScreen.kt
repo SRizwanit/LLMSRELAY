@@ -1,26 +1,50 @@
 package com.srizwan.task
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.srizwan.task.task.BookGrid
 import com.srizwan.task.task.PayPane
+import com.srizwan.task.task.RankPane
 import com.srizwan.task.task.TaskDashboard
 import com.srizwan.task.task.resumeTarget
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TaskScreen(navController: NavController, vm: TaskViewModel = viewModel()) {
-    val state = vm.state
     val context = LocalContext.current
+    val state by vm.state.collectAsState()
 
     LaunchedEffect(Unit) {
         vm.load(context)
@@ -28,46 +52,65 @@ fun TaskScreen(navController: NavController, vm: TaskViewModel = viewModel()) {
 
     Scaffold(
         topBar = { TaskTopBar(state, navController, vm) },
-        bottomBar = { TaskBottomNav(state.tab, vm) }
+        bottomBar = { TaskBottomNav(state.tab, vm) },
+        containerColor = MaterialTheme.colorScheme.background
     ) { pad ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(pad)
-                .background(MaterialTheme.colorScheme.background)
         ) {
-            TaskPane(state, vm, navController)
+            if (state.loading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else {
+                TaskPane(state, vm, navController)
+            }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TaskTopBar(state: TaskState, nav: NavController, vm: TaskViewModel) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 2.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    CenterAlignedTopAppBar(
+        title = {
             Text(
                 text = "RizwanTask 📑",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { nav.navigate(Routes.PROFILE) }) {
-                    Text("প্রোফাইল")
-                }
+        },
+        navigationIcon = {
+            Box(
+                modifier = Modifier
+                    .padding(start = 12.dp)
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = state.userName.firstOrNull()?.uppercase() ?: "U",
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
             }
-        }
-    }
+        },
+        actions = {
+            IconButton(onClick = { nav.navigate(Routes.PROFILE) }) {
+                Icon(
+                    painter = painterResource(R.drawable.rizwantask),
+                    contentDescription = "Profile",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        },
+        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        modifier = Modifier.statusBarsPadding()
+    )
 }
 
 @Composable
@@ -76,20 +119,35 @@ private fun TaskBottomNav(tab: TaskTab, vm: TaskViewModel) {
         NavigationBarItem(
             selected = tab == TaskTab.TASK,
             onClick = { vm.switchTab(TaskTab.TASK) },
-            icon = { Text("📋", fontSize = 20.sp) },
-            label = { Text("টাস্ক", fontSize = 12.sp) }
+            icon = {
+                Icon(
+                    painter = painterResource(R.drawable.rizwantask),
+                    contentDescription = "টাস্ক"
+                )
+            },
+            label = { Text("টাস্ক") }
         )
         NavigationBarItem(
             selected = tab == TaskTab.PAY,
             onClick = { vm.switchTab(TaskTab.PAY) },
-            icon = { Text("💰", fontSize = 20.sp) },
-            label = { Text("পেমেন্ট", fontSize = 12.sp) }
+            icon = {
+                Icon(
+                    painter = painterResource(R.drawable.rizwantask),
+                    contentDescription = "পেমেন্ট"
+                )
+            },
+            label = { Text("পেমেন্ট") }
         )
         NavigationBarItem(
             selected = tab == TaskTab.RANK,
             onClick = { vm.switchTab(TaskTab.RANK) },
-            icon = { Text("🏆", fontSize = 20.sp) },
-            label = { Text("র‍্যাংক", fontSize = 12.sp) }
+            icon = {
+                Icon(
+                    painter = painterResource(R.drawable.rizwantask),
+                    contentDescription = "র‍্যাংক"
+                )
+            },
+            label = { Text("র‍্যাংক") }
         )
     }
 }
@@ -97,74 +155,74 @@ private fun TaskBottomNav(tab: TaskTab, vm: TaskViewModel) {
 @Composable
 private fun TaskPane(state: TaskState, vm: TaskViewModel, navController: NavController) {
     val context = LocalContext.current
-
+    
     when (state.tab) {
         TaskTab.TASK -> {
-            val booksById = state.books.associateBy { it.optInt("id", 0).toString() }
-            val goal = vm.readGoalFromPrefs(context, state.me?.optInt("id") ?: 0)
-            val resume = vm.findResume(state.proofs, booksById)
-            val resumeT = resumeTarget(resume, booksById, state.proofs)
-
-            TaskDashboard(
-                ready = state.me != null && state.books.isNotEmpty(),
-                me = state.me,
-                books = state.books,
-                proofs = state.proofs,
-                booksById = booksById,
-                query = state.query,
-                onQueryChange = { vm.setQuery(it) },
-                goal = goal,
-                resume = resumeT,
-                rateOf = vm::rateOf,
-                onGoal = { vm.showGoalDialog(true) },
-                onResume = { book, stem ->
-                    // TODO: navigate to view?book=...&page=...
-                }
-            )
+            Column(modifier = Modifier.fillMaxSize()) {
+                val resume = resumeTarget(
+                    state.books.firstOrNull { b ->
+                        val id = b.optString("id", "")
+                        val total = b.optInt("total_pages", 0)
+                        val done = state.proofs.count { it.optString("book_id") == id }
+                        done > 0 && done < total
+                    },
+                    state.booksById,
+                    state.proofs
+                )
+                
+                TaskDashboard(
+                    state = state,
+                    onGoal = { vm.showGoalDialog(true) },
+                    resume = resume,
+                    onResume = { book: String, page: Int ->
+                        // ধাপ ৭-এ View রুট বানানো হবে
+                    },
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Spacer(Modifier.height(12.dp))
+                BookGrid(
+                    ready = !state.loading,
+                    me = state.userId,
+                    books = state.books,
+                    proofs = state.proofs,
+                    booksById = state.booksById,
+                    query = state.query,
+                    onQueryChange = { vm.setQuery(it) },
+                    goal = state.goal,
+                    resume = resume,
+                    rateOf = { vm.rateOf(it) },
+                    onResume = { book: String, page: Int ->
+                        // ধাপ ৭-এ View রুট বানানো হবে
+                    },
+                    onOpen = { book: String, page: Int ->
+                        // ধাপ ৭-এ View রুট বানানো হবে
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
         TaskTab.PAY -> {
             PayPane(
                 state = state,
                 vm = vm,
                 proofs = state.proofs,
-                pays = state.pays
+                pays = state.money?.payments ?: emptyList()
             )
         }
-        TaskTab.RANK -> PlaceholderPane("র‍্যাংক")
-    }
-
-    state.error?.let { err ->
-        LaunchedEffect(err) {
-            // TODO: show Snackbar
-        }
-    }
-}
-
-@Composable
-private fun PlaceholderPane(label: String) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "পরের ধাপে বানানো হবে",
-                color = AppColors.extra.muted
+        TaskTab.RANK -> {
+            RankPane(
+                period = state.rankPeriod,
+                onPeriod = { vm.switchRankPeriod(it) },
+                loading = state.rankLoading,
+                data = state.rankData,
+                error = state.rankError,
+                meId = state.userId
             )
         }
     }
 }
 
 private fun bn(n: Int): String {
-    val map = mapOf('0' to '০', '1' to '১', '2' to '২', '3' to '৩', '4' to '৪', '5' to '৫', '6' to '৬', '7' to '৭', '8' to '৮', '9' to '৯')
-    return n.toString().map { map[it] ?: it }.joinToString("")
+    val digits = "০১২৩৪৫৬৭৮৯"
+    return n.toString().map { if (it.isDigit()) digits[it - '0'] else it }.joinToString("")
 }

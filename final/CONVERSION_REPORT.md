@@ -8,3 +8,4 @@
 
 ## ❌ ফেইল
 - 4c: e: file:///home/runner/work/LLMSRELAY/LLMSRELAY/final/app/src/main/kotlin/com/srizwan/task/task/BookGrid.kt:10:34 Unresolved reference 'icons'. e: file:///home/runner/work/LLMSRELAY/LLMSRELAY/final/app/src/main/kotlin/com/srizwan/task/task/BookGrid.kt:11:34 Unresolved reference 'icons'. e: file:///h
+- 4d: e: file:///home/runner/work/LLMSRELAY/LLMSRELAY/final/app/src/main/kotlin/com/srizwan/task/task/TaskDashboard.kt:218:22 None of the following candidates is applicable: * What went wrong: Execution failed for task ':app:compileDebugKotlin' (registered by plugin 'org.jetbrains.kotlin.android'). > A fa
