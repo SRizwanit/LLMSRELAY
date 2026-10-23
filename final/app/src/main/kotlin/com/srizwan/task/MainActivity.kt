@@ -28,6 +28,7 @@ import androidx.navigation.compose.rememberNavController
 object Routes {
     const val SPLASH = "splash"
     const val LOGIN = "login"
+    const val SIGNUP = "signup"
     const val TASK = "task"
 }
 
@@ -58,7 +59,19 @@ private fun AppNav() {
                 }
             }
         }
-        composable(Routes.LOGIN) { PlaceholderScreen("লগইন") }
+        composable(Routes.LOGIN) {
+            LoginScreen(
+                onSuccess = {
+                    nav.navigate(Routes.TASK) {
+                        popUpTo(Routes.LOGIN) { inclusive = true }
+                    }
+                },
+                onSignup = {
+                    nav.navigate(Routes.SIGNUP)
+                }
+            )
+        }
+        composable(Routes.SIGNUP) { PlaceholderScreen("সাইনআপ") }
         composable(Routes.TASK) { PlaceholderScreen("টাস্ক") }
     }
 }

@@ -4,6 +4,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+fun cfg(key: String): String = project.findProperty(key)?.toString()
+    ?: providers.gradleProperty(key).orNull
+    ?: ""
+
 android {
     namespace = "com.srizwan.task"
     compileSdk = 36
@@ -16,6 +20,11 @@ android {
         versionName = "1.0.0"
         vectorDrawables.useSupportLibrary = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "SB_URL", "\"${cfg("SB_URL")}\"")
+        buildConfigField("String", "SB_KEY", "\"${cfg("SB_KEY")}\"")
+        buildConfigField("String", "ADMIN_PHONE", "\"${cfg("ADMIN_PHONE")}\"")
+        buildConfigField("String", "ADMIN_WA", "\"${cfg("ADMIN_WA")}\"")
     }
 
     buildTypes {
