@@ -1,0 +1,25 @@
+name: LLMsRelay test
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ANTHROPIC_BASE_URL: https://api.llmsrelay.com
+      ANTHROPIC_API_KEY: ${{ secrets.LLMSRELAY_API_KEY }}
+      ANTHROPIC_MODEL: claude-opus-5-5
+    steps:
+      - name: Check key is present
+        run: '[ -n "$ANTHROPIC_API_KEY" ] && echo "key present" || { echo "key missing"; exit 1; }'
+
+      - name: Verification request
+        run: |
+          curl -sS --fail-with-body https://api.llmsrelay.com/v1/messages \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "content-type: application/json" \
+            -d '{"model":"claude-opus-5-5","max_tokens":64,"messages":[{"role":"user","content":"Reply with OK"}]}'
