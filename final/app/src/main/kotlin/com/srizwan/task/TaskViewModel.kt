@@ -7,35 +7,30 @@ import com.srizwan.task.data.Api
 import com.srizwan.task.task.RankData
 import com.srizwan.task.task.RankPeriod
 import com.srizwan.task.task.RankRow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import java.net.URLEncoder
 import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
+import java.util.*
 
 enum class TaskTab { TASK, PAY, RANK }
 
 data class TaskState(
-    val tab: TaskTab = TaskTab.TASK,
     val loading: Boolean = true,
-    val user: JSONObject? = null,
+    val error: String = "",
+    val tab: TaskTab = TaskTab.TASK,
+    val userId: Int = 0,
     val books: List<JSONObject> = emptyList(),
     val proofs: List<JSONObject> = emptyList(),
     val query: String = "",
     val todayCount: Int = 0,
-    val totalCount: Int = 0,
-    val goal: Int = 5,
+    val goal: Int = 10,
     val goalHit: Boolean = false,
-    val goalDialogOpen: Boolean = false,
-    val money: FinData? = null,
-    val booksById: Map<String, JSONObject> = emptyMap(),
-    val corrections: List<JSONObject> = emptyList(),
-    val payHistory: List<JSONObject> = emptyList(),
+    val showGoalDialog: Boolean = false,
+    val money: FinData = FinData(),
     val moneyLoading: Boolean = false,
     val moneyError: String = "",
     val rankPeriod: RankPeriod = RankPeriod.DAY,
@@ -47,19 +42,22 @@ data class TaskState(
 data class FinData(
     val approved: Int = 0,
     val pending: Int = 0,
-    val corrected: Int = 0,
-    val canReq: Boolean = false,
+    val correction: Int = 0,
+    val paid: Int = 0,
+    val wallet: Int = 0,
+    val history: List<JSONObject> = emptyList(),
     val bookSums: List<BookPaySum> = emptyList(),
-    val corrections: List<JSONObject> = emptyList()
+    val corrections: List<JSONObject> = emptyList(),
+    val canReq: Boolean = false
 )
 
 data class BookPaySum(
     val bookId: String,
     val approved: Int,
     val pending: Int,
-    val corrected: Int,
-    val cancelled: Int,
-    val total: Int
+    val correction: Int,
+    val total: Int,
+    val cancelled: Int = 0
 )
 
 class TaskViewModel : ViewModel() {
@@ -67,29 +65,21 @@ class TaskViewModel : ViewModel() {
     val state = _state.asStateFlow()
 
     fun load(context: Context) {
-        viewModelScope.launch {
-            _state.update { it.copy(loading = true) }
-            val session = Session.get(context)
-            if (session == null) {
-                _state.update { it.copy(loading = false) }
-                return@launch
-            }
-            val userId = session.optInt("id")
-            val api = Api(context)
+        val s = Session.get(context) ?: return
+        val uid = s.optInt("id", 0)
+        if (uid == 0) return
 
+        _state.update { it.copy(loading = true, userId = uid, goal = readGoalFromPrefs(context, uid)) }
+
+        viewModelScope.launch {
             try {
-                val user = api.get("app_users?id=eq.$userId&limit=1").optJSONObject(0)
-                if (user != null) {
-                    _state.update { it.copy(user = user) }
-                    loadBooks(context)
-                    loadCount(context, userId)
-                    loadMoney(context, userId)
-                    loadRank(context, userId, _state.value.rankPeriod)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
+                loadBooks(context)
+                loadCount(context, uid)
+                loadMoney(context, uid)
+                loadRank(context, uid, _state.value.rankPeriod)
                 _state.update { it.copy(loading = false) }
+            } catch (e: Exception) {
+                _state.update { it.copy(loading = false, error = e.message ?: "লোড ব্যর্থ") }
             }
         }
     }
@@ -103,133 +93,87 @@ class TaskViewModel : ViewModel() {
     }
 
     fun showGoalDialog(show: Boolean) {
-        _state.update { it.copy(goalDialogOpen = show) }
+        _state.update { it.copy(showGoalDialog = show) }
     }
 
     private suspend fun loadBooks(context: Context) {
         val api = Api(context)
-        try {
-            val arr = api.get("books?select=*&order=id.asc")
-            val list = (0 until arr.length()).map { arr.getJSONObject(it) }
-            val map = list.associateBy { it.optString("id") }
-            _state.update { it.copy(books = list, booksById = map) }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        val arr = api.get("app_books?select=*&order=id.asc")
+        val list = (0 until arr.length()).map { arr.getJSONObject(it) }
+        _state.update { it.copy(books = list) }
     }
 
     private suspend fun loadCount(context: Context, userId: Int) {
         val api = Api(context)
-        try {
-            val today = iso(System.currentTimeMillis()).substring(0, 10)
-            val proofsArr = api.get("page_proofs?user_id=eq.$userId&select=*&order=created_at.desc")
-            val proofs = (0 until proofsArr.length()).map { proofsArr.getJSONObject(it) }
-            val todayCount = proofs.count { it.optString("created_at", "").startsWith(today) }
-            val totalCount = proofs.size
-            val goal = readGoalFromPrefs(context, userId)
-            val goalHit = todayCount >= goal
-            _state.update {
-                it.copy(
-                    proofs = proofs,
-                    todayCount = todayCount,
-                    totalCount = totalCount,
-                    goal = goal,
-                    goalHit = goalHit
-                )
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val arr = api.get("page_proofs?user_id=eq.$userId&select=*&order=created_at.desc")
+        val all = (0 until arr.length()).map { arr.getJSONObject(it) }
+        val todayCount = all.count { it.optString("created_at", "").startsWith(today) }
+        val goalHit = todayCount >= _state.value.goal
+        _state.update { it.copy(proofs = all, todayCount = todayCount, goalHit = goalHit) }
     }
 
     private suspend fun loadMoney(context: Context, userId: Int) {
         _state.update { it.copy(moneyLoading = true, moneyError = "") }
-        val api = Api(context)
         try {
-            val proofsArr = api.get("page_proofs?user_id=eq.$userId&select=book_id,page,status,rate")
+            val api = Api(context)
+            val proofsArr = api.get("page_proofs?user_id=eq.$userId&select=*")
             val proofs = (0 until proofsArr.length()).map { proofsArr.getJSONObject(it) }
+
+            val booksById = _state.value.books.associateBy { it.optString("id", "") }
 
             var approved = 0
             var pending = 0
-            var corrected = 0
+            var correction = 0
+            val bookMap = mutableMapOf<String, Triple<Int, Int, Int>>()
 
-            val bookMap = mutableMapOf<String, BookPaySum>()
-
-            for (p in proofs) {
-                val rate = p.optInt("rate", 0)
-                val status = p.optString("status", "pending")
-                val bookId = p.optString("book_id", "")
-
-                val key = bookId.ifEmpty { "unknown" }
-                val sum = bookMap.getOrPut(key) { BookPaySum(key, 0, 0, 0, 0, 0) }
-
-                when (status) {
+            proofs.forEach { p ->
+                val st = p.optString("status", "pending")
+                val bid = p.optString("book_id", "")
+                val rate = booksById[bid]?.optInt("rate_per_page", 1) ?: 1
+                val old = bookMap[bid] ?: Triple(0, 0, 0)
+                when (st) {
                     "approved" -> {
                         approved += rate
-                        bookMap[key] = sum.copy(
-                            approved = sum.approved + rate,
-                            total = sum.total + rate
-                        )
+                        bookMap[bid] = old.copy(first = old.first + rate)
                     }
                     "pending" -> {
                         pending += rate
-                        bookMap[key] = sum.copy(
-                            pending = sum.pending + rate,
-                            total = sum.total + rate
-                        )
+                        bookMap[bid] = old.copy(second = old.second + rate)
                     }
-                    "corrected" -> {
-                        corrected += rate
-                        bookMap[key] = sum.copy(
-                            corrected = sum.corrected + rate,
-                            total = sum.total + rate
-                        )
-                    }
-                    "cancelled" -> {
-                        bookMap[key] = sum.copy(
-                            cancelled = sum.cancelled + 1,
-                            total = sum.total + rate
-                        )
+                    "correction" -> {
+                        correction += rate
+                        bookMap[bid] = old.copy(third = old.third + rate)
                     }
                 }
             }
 
-            val corrArr = api.get("payment_corrections?user_id=eq.$userId&select=*")
-            val corrections = (0 until corrArr.length()).map { corrArr.getJSONObject(it) }
-            for (c in corrections) {
-                corrected += c.optInt("amount", 0)
+            val bookSums = bookMap.map { (bid, t) ->
+                val tot = t.first + t.second + t.third
+                BookPaySum(bid, t.first, t.second, t.third, tot, 0)
             }
 
             val payArr = api.get("payments?user_id=eq.$userId&select=*&order=created_at.desc")
-            val payHistory = (0 until payArr.length()).map { payArr.getJSONObject(it) }
+            val history = (0 until payArr.length()).map { payArr.getJSONObject(it) }
+            val paid = history.filter { it.optString("status") == "completed" }
+                .sumOf { it.optInt("amount", 0) }
 
-            val canReq = approved >= 200
+            val corrArr = api.get("page_proofs?user_id=eq.$userId&status=eq.correction&select=*&order=created_at.desc")
+            val corrections = (0 until corrArr.length()).map { corrArr.getJSONObject(it) }
 
-            val money = FinData(
-                approved = approved,
-                pending = pending,
-                corrected = corrected,
-                canReq = canReq,
-                bookSums = bookMap.values.toList(),
-                corrections = corrections
-            )
+            val wallet = approved - paid
+            val canReq = wallet >= 100 && history.none { it.optString("status") == "pending" }
 
             _state.update {
                 it.copy(
-                    money = money,
-                    corrections = corrections,
-                    payHistory = payHistory,
+                    money = FinData(
+                        approved, pending, correction, paid, wallet, history, bookSums, corrections, canReq
+                    ),
                     moneyLoading = false
                 )
             }
         } catch (e: Exception) {
-            e.printStackTrace()
-            _state.update {
-                it.copy(
-                    moneyLoading = false,
-                    moneyError = e.message ?: "অজানা ত্রুটি"
-                )
-            }
+            _state.update { it.copy(moneyLoading = false, moneyError = e.message ?: "লোড ব্যর্থ") }
         }
     }
 
@@ -237,102 +181,105 @@ class TaskViewModel : ViewModel() {
 
     fun requestPayment(context: Context) {
         viewModelScope.launch {
-            val session = Session.get(context) ?: return@launch
-            val userId = session.optInt("id")
-            val api = Api(context)
             try {
+                val api = Api(context)
                 val body = JSONObject().apply {
-                    put("user_id", userId)
+                    put("user_id", _state.value.userId)
+                    put("amount", _state.value.money.wallet)
+                    put("status", "pending")
                     put("created_at", iso(System.currentTimeMillis()))
                 }
-                api.post("payment_requests", body)
-                loadMoney(context, userId)
+                api.post("payments", body)
+                delay(500)
+                loadMoney(context, _state.value.userId)
             } catch (e: Exception) {
-                e.printStackTrace()
+                _state.update { it.copy(error = e.message ?: "অনুরোধ ব্যর্থ") }
             }
         }
     }
 
     fun readGoalFromPrefs(context: Context, userId: Int): Int {
         val prefs = context.getSharedPreferences("task_prefs", Context.MODE_PRIVATE)
-        return prefs.getInt("goal_$userId", 5)
+        return prefs.getInt("goal_$userId", 10)
     }
 
     private fun iso(ms: Long): String {
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
-        sdf.timeZone = TimeZone.getTimeZone("UTC")
-        return sdf.format(Date(ms))
+        return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date(ms))
     }
 
     fun switchRankPeriod(p: RankPeriod) {
-        if (_state.value.rankPeriod == p) return
-        _state.update { it.copy(rankPeriod = p, rankError = "") }
-        val session = _state.value.user
-        if (session != null) {
-            val userId = session.optInt("id")
-            viewModelScope.launch {
-                loadRank(App.instance, userId, p)
+        _state.update { it.copy(rankPeriod = p, rankLoading = true) }
+        viewModelScope.launch {
+            try {
+                loadRank(App.instance, _state.value.userId, p)
+            } catch (e: Exception) {
+                _state.update { it.copy(rankLoading = false, rankError = e.message ?: "লোড ব্যর্থ") }
             }
         }
     }
 
     private suspend fun loadRank(context: Context, userId: Int, period: RankPeriod) {
-        _state.update { it.copy(rankLoading = true, rankError = "") }
         val api = Api(context)
-        try {
-            val where = when (period) {
-                RankPeriod.DAY -> {
-                    val today = iso(System.currentTimeMillis()).substring(0, 10)
-                    "created_at=gte.$today"
-                }
-                RankPeriod.WEEK -> {
-                    val weekAgo = System.currentTimeMillis() - 7L * 24 * 3600 * 1000
-                    "created_at=gte.${iso(weekAgo)}"
-                }
-                RankPeriod.ALL -> ""
-            }
 
-            val path = if (where.isNotEmpty()) {
-                "page_proofs?$where&select=user_id&order=user_id"
-            } else {
-                "page_proofs?select=user_id&order=user_id"
+        val now = System.currentTimeMillis()
+        val cal = Calendar.getInstance()
+        val filter = when (period) {
+            RankPeriod.DAY -> {
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                val start = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(cal.time)
+                "created_at=gte.$start"
             }
-
-            val arr = api.get(path)
-            val counts = mutableMapOf<Int, Int>()
-            for (i in 0 until arr.length()) {
-                val uid = arr.getJSONObject(i).optInt("user_id")
-                counts[uid] = counts.getOrDefault(uid, 0) + 1
+            RankPeriod.WEEK -> {
+                cal.set(Calendar.DAY_OF_WEEK, Calendar.SATURDAY)
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                if (cal.timeInMillis > now) cal.add(Calendar.WEEK_OF_YEAR, -1)
+                val start = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(cal.time)
+                "created_at=gte.$start"
             }
+            RankPeriod.ALL -> ""
+        }
 
-            val rows = counts.map { RankRow(it.key, it.value) }.sortedByDescending { it.n }
+        val path = if (filter.isEmpty()) {
+            "page_proofs?status=eq.approved&select=user_id"
+        } else {
+            "page_proofs?status=eq.approved&$filter&select=user_id"
+        }
 
-            val userIds = rows.map { it.id }.distinct().joinToString(",")
-            val names = mutableMapOf<Int, String>()
-            if (userIds.isNotEmpty()) {
-                val usersArr = api.get("app_users?id=in.($userIds)&select=id,full_name")
-                for (i in 0 until usersArr.length()) {
-                    val u = usersArr.getJSONObject(i)
-                    names[u.optInt("id")] = u.optString("full_name", "ইউজার")
-                }
-            }
+        val arr = api.get(path)
+        val userCounts = mutableMapOf<Int, Int>()
+        for (i in 0 until arr.length()) {
+            val uid = arr.getJSONObject(i).optInt("user_id", 0)
+            if (uid > 0) userCounts[uid] = (userCounts[uid] ?: 0) + 1
+        }
 
-            _state.update {
-                it.copy(
-                    rankData = RankData(period, rows, names),
-                    rankLoading = false
-                )
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            _state.update {
-                it.copy(
-                    rankLoading = false,
-                    rankError = e.message ?: "অজানা ত্রুটি"
-                )
+        val rows = userCounts.map { (id, n) -> RankRow(id, n) }
+            .sortedByDescending { it.n }
+
+        val userIds = rows.map { it.id }.distinct()
+        val names = mutableMapOf<Int, String>()
+        if (userIds.isNotEmpty()) {
+            val usersPath = "app_users?id=in.(${userIds.joinToString(",")})&select=id,full_name"
+            val usersArr = api.get(usersPath)
+            for (i in 0 until usersArr.length()) {
+                val u = usersArr.getJSONObject(i)
+                names[u.optInt("id", 0)] = u.optString("full_name", "ইউজার")
             }
         }
-    }
 
-    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+        _state.update {
+            it.copy(
+                rankLoading = false,
+                rankData = RankData(period, rows, names),
+                rankError = ""
+            )
+        }
+    }
 }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
@@ -27,8 +28,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
 import com.srizwan.task.AppColors
 import com.srizwan.task.TaskState
+import com.srizwan.task.TaskViewModel
 import org.json.JSONObject
 
 data class ResumeTarget(val book: JSONObject, val stem: String)
@@ -42,76 +45,90 @@ data class StreakInfo(
 @Composable
 fun TaskDashboard(
     state: TaskState,
-    onGoal: () -> Unit,
-    resume: ResumeTarget?,
-    onResume: (String, Int) -> Unit,
-    modifier: Modifier = Modifier
+    vm: TaskViewModel,
+    navController: NavController
 ) {
     val pct = if (state.goal > 0) state.todayCount.toFloat() / state.goal else 0f
     val left = (state.goal - state.todayCount).coerceAtLeast(0)
     val streak = streakInfo(state.proofs)
+    val booksById = state.books.associateBy { it.optString("id", "") }
+    val resume = findResume(state.proofs, booksById)
 
-    Column(
-        modifier = modifier
+    LazyColumn(
+        modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Spacer(Modifier.height(4.dp))
-        GoalCard(state.todayCount, state.goal, state.goalHit, pct, left, onGoal)
-        StreakCard(streak.current, streak.best, streak.doneToday)
+        item { Spacer(Modifier.height(4.dp)) }
+        item { GoalCard(state.todayCount, state.goal, state.goalHit, pct, left, vm::showGoalDialog) }
+        item { StreakCard(streak.current, streak.best, streak.doneToday) }
 
         if (resume != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                        RoundedCornerShape(12.dp)
-                    )
-                    .clickable {
-                        val id = resume.book.optString("id", "")
-                        val done = state.proofs.count { it.optString("book_id") == id }
-                        onResume(id, done + 1)
-                    }
-                    .padding(16.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "📖",
-                        fontSize = 32.sp,
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "চালিয়ে যান",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AppColors.extra.muted
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                            RoundedCornerShape(12.dp)
                         )
+                        .clickable {
+                            // TODO: navigate to view screen when ready
+                        }
+                        .padding(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = resume.stem,
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.primary
+                            text = "📖",
+                            fontSize = 32.sp,
+                            modifier = Modifier.size(32.dp)
                         )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "চালিয়ে যান",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AppColors.extra.muted
+                            )
+                            Text(
+                                text = resume.stem,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }
         }
+
+        item {
+            BookGrid(
+                books = state.books,
+                proofs = state.proofs,
+                query = state.query,
+                onQueryChange = vm::setQuery,
+                onOpen = { _, _ ->
+                    // TODO: navigate to view screen when ready
+                }
+            )
+        }
+
+        item { Spacer(Modifier.height(80.dp)) }
     }
 }
 
 @Composable
-private fun GoalCard(today: Int, goal: Int, hit: Boolean, pct: Float, left: Int, onGoal: () -> Unit) {
+private fun GoalCard(today: Int, goal: Int, hit: Boolean, pct: Float, left: Int, onGoal: (Boolean) -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surface)
-            .clickable(onClick = onGoal)
+            .clickable(onClick = { onGoal(true) })
             .padding(16.dp)
     ) {
         Column {
@@ -234,14 +251,15 @@ private fun BadgeRow(best: Int) {
     }
 }
 
-fun resumeTarget(resume: JSONObject?, booksById: Map<String, JSONObject>, proofs: List<JSONObject>): ResumeTarget? {
-    if (resume == null) return null
-    val id = resume.optString("id", "")
-    val name = resume.optString("name", "")
-    val done = proofs.count { it.optString("book_id") == id }
-    val total = resume.optInt("total_pages", 0)
-    val stem = "$name · পেইজ ${bn(done + 1)}/${bn(total)}"
-    return ResumeTarget(resume, stem)
+fun findResume(proofs: List<JSONObject>, booksById: Map<String, JSONObject>): ResumeTarget? {
+    if (proofs.isEmpty()) return null
+    val last = proofs.firstOrNull { it.optString("status") == "approved" } ?: return null
+    val bookId = last.optString("book_id", "")
+    val book = booksById[bookId] ?: return null
+    val done = proofs.count { it.optString("book_id") == bookId && it.optString("status") == "approved" }
+    val total = book.optInt("total_pages", 0)
+    val stem = "${book.optString("name", "কিতাব")} · পেইজ ${bn(done + 1)}/${bn(total)}"
+    return ResumeTarget(book, stem)
 }
 
 fun streakInfo(proofs: List<JSONObject>): StreakInfo {

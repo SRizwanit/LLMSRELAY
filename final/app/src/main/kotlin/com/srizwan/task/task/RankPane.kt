@@ -1,25 +1,12 @@
 package com.srizwan.task.task
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,186 +45,197 @@ fun RankPane(
 ) {
     if (hidden) return
 
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 16.dp)
+            .widthIn(max = 520.dp)
+            .padding(top = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        item {
-            Spacer(Modifier.height(16.dp))
-
-            // Header card
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp
+        // হেডার কার্ড
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(
-                                    colors = listOf(Color(0xFFa8761f), Color(0xFFf2d27a))
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFa8761f),
+                                    Color(0xFFf2d27a)
                                 )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "🏆",
-                            fontSize = 32.sp,
-                            color = Color(0xFF4a3200)
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text(
-                        text = "লিডারবোর্ড",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(Modifier.height(8.dp))
-
-                    val myRank = if (data != null) {
-                        val idx = data.rows.indexOfFirst { it.id == meId }
-                        val lab = data.period.label
-                        when {
-                            idx < 0 -> "$lab আপনার কোনো পেইজ নেই — একটি পেইজ প্রুফ করলেই তালিকায় আসবেন!"
-                            idx == 0 -> "$lab আপনি ১ নম্বরে! মাশাআল্লাহ, এগিয়ে থাকুন।"
-                            else -> {
-                                val behind = data.rows[idx - 1].n - data.rows[idx].n
-                                "$lab আপনার অবস্থান ${bn(idx + 1)} নম্বর • পরের জনের থেকে ${bn(behind)} পেইজ পিছনে"
-                            }
-                        }
-                    } else ""
-
-                    Text(
-                        text = myRank,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = AppColors.extra.muted,
-                        textAlign = TextAlign.Center
+                        text = "🏆",
+                        fontSize = 32.sp
                     )
                 }
+
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = "লিডারবোর্ড",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                // নিজের অবস্থান
+                val myRank = if (data != null) {
+                    val idx = data.rows.indexOfFirst { it.id == meId }
+                    val lab = when (data.period) {
+                        RankPeriod.DAY -> "আজ"
+                        RankPeriod.WEEK -> "এই সপ্তাহে"
+                        RankPeriod.ALL -> "সব মিলিয়ে"
+                    }
+                    when {
+                        idx < 0 -> "$lab আপনার কোনো পেইজ নেই — একটি পেইজ প্রুফ করলেই তালিকায় আসবেন!"
+                        idx == 0 -> "$lab আপনি ১ নম্বরে! মাশাআল্লাহ, এগিয়ে থাকুন।"
+                        else -> {
+                            val behind = data.rows[idx - 1].n - data.rows[idx].n
+                            "$lab আপনার অবস্থান ${bn(idx + 1)} নম্বর • পরের জনের থেকে ${bn(behind)} পেইজ পিছনে"
+                        }
+                    }
+                } else ""
+
+                Text(
+                    text = myRank,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AppColors.extra.muted,
+                    textAlign = TextAlign.Center
+                )
             }
-            Spacer(Modifier.height(16.dp))
         }
 
-        item {
-            // Period chips
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                RankPeriod.entries.forEach { p ->
-                    val selected = period == p
-                    Surface(
-                        onClick = { onPeriod(p) },
-                        shape = RoundedCornerShape(20.dp),
-                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.padding(horizontal = 4.dp)
-                    ) {
+        Spacer(Modifier.height(14.dp))
+
+        // পিরিয়ড চিপস
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RankPeriod.entries.forEach { p ->
+                val sel = period == p
+                FilterChip(
+                    selected = sel,
+                    onClick = { onPeriod(p) },
+                    label = {
                         Text(
                             text = p.label,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelLarge
+                            style = MaterialTheme.typography.bodyMedium
                         )
-                    }
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-        }
-
-        if (loading) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(32.dp),
-                        color = MaterialTheme.colorScheme.primary
+                    },
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
+                )
             }
         }
 
-        if (error.isNotEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
+        Spacer(Modifier.height(12.dp))
+
+        // লোডিং
+        if (loading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    strokeWidth = 3.dp
+                )
+            }
+        }
+
+        // তালিকা বা এরর
+        when {
+            error.isNotEmpty() -> {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Text(
                         text = "লিডারবোর্ড আনা যায়নি: $error",
                         style = MaterialTheme.typography.bodyMedium,
                         color = AppColors.extra.muted,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(20.dp)
                     )
                 }
             }
-        }
-
-        if (data != null && !loading && error.isEmpty()) {
-            if (data.rows.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(32.dp),
-                        contentAlignment = Alignment.Center
+            data != null -> {
+                if (data.rows.isEmpty()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                     ) {
                         Text(
                             text = "এই সময়ে এখনো কেউ কোনো পেইজ প্রুফড করেননি — প্রথম হওয়ার সুযোগ আপনার!",
                             style = MaterialTheme.typography.bodyMedium,
                             color = AppColors.extra.muted,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            } else {
-                val myIdx = data.rows.indexOfFirst { it.id == meId }
-                val top20 = data.rows.take(20)
-
-                itemsIndexed(top20) { i, r ->
-                    RankRowItem(r = r, i = i, meId = meId, names = data.names)
-                }
-
-                if (myIdx >= 20) {
-                    item {
-                        Text(
-                            text = "⋮",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
                             textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AppColors.extra.muted
+                            modifier = Modifier.padding(20.dp)
                         )
                     }
-                    item {
-                        RankRowItem(
-                            r = data.rows[myIdx],
-                            i = myIdx,
-                            meId = meId,
-                            names = data.names
-                        )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // টপ ২০
+                        itemsIndexed(data.rows.take(20)) { i, r ->
+                            RankRowItem(r, i, meId, data.names)
+                        }
+
+                        // নিজের সারি যদি ২০-এর পরে
+                        val idx = data.rows.indexOfFirst { it.id == meId }
+                        if (idx >= 20) {
+                            item {
+                                Text(
+                                    text = "⋮",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = AppColors.extra.muted,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp)
+                                )
+                            }
+                            item {
+                                RankRowItem(data.rows[idx], idx, meId, data.names)
+                            }
+                        }
+
+                        item { Spacer(Modifier.height(80.dp)) }
                     }
                 }
             }
-        }
-
-        item {
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -245,50 +243,72 @@ fun RankPane(
 @Composable
 private fun RankRowItem(r: RankRow, i: Int, meId: Int, names: Map<Int, String>) {
     val mine = r.id == meId
-    val rankColor = when (i) {
-        0 -> Color(0xFFFFD700) // Gold
-        1 -> Color(0xFFC0C0C0) // Silver
-        2 -> Color(0xFFCD7F32) // Bronze
-        else -> MaterialTheme.colorScheme.onSurface
+    val topThree = i < 3
+
+    val bg = when {
+        mine -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+        topThree -> when (i) {
+            0 -> Color(0xFFFFD700).copy(alpha = 0.15f)
+            1 -> Color(0xFFC0C0C0).copy(alpha = 0.15f)
+            2 -> Color(0xFFCD7F32).copy(alpha = 0.15f)
+            else -> MaterialTheme.colorScheme.surface
+        }
+        else -> MaterialTheme.colorScheme.surface
     }
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
+    Card(
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        color = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-        tonalElevation = if (mine) 4.dp else 1.dp
+        colors = CardDefaults.cardColors(containerColor = bg)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            // র‍্যাংক
             Text(
                 text = bn(i + 1),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = if (i < 3) FontWeight.Bold else FontWeight.Normal,
-                color = rankColor,
+                fontWeight = if (topThree) FontWeight.Bold else FontWeight.Normal,
+                color = if (topThree) {
+                    when (i) {
+                        0 -> Color(0xFFB8860B)
+                        1 -> Color(0xFF808080)
+                        2 -> Color(0xFF8B4513)
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
+                } else MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.width(40.dp)
             )
+
+            // নাম
             Text(
                 text = (names[r.id] ?: "ইউজার") + if (mine) " (আপনি)" else "",
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = if (mine) FontWeight.SemiBold else FontWeight.Normal,
-                modifier = Modifier.weight(1f),
-                color = if (mine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                color = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp)
             )
+
+            // পেইজ কাউন্ট
             Text(
                 text = "${bn(r.n)} পেইজ",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
-                color = if (mine) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                color = AppColors.extra.muted
             )
         }
     }
 }
 
 private fun bn(n: Int): String {
-    val bengali = arrayOf('০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯')
-    return n.toString().map { if (it.isDigit()) bengali[it - '0'] else it }.joinToString("")
+    val bengaliDigits = arrayOf('০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯')
+    return n.toString().map { c ->
+        if (c.isDigit()) bengaliDigits[c - '0'] else c
+    }.joinToString("")
 }

@@ -45,6 +45,7 @@ fun PayPane(
 ) {
     val money = state.money
     val context = LocalContext.current
+    val booksById = state.books.associateBy { it.optString("id", "") }
 
     LazyColumn(
         modifier = Modifier
@@ -83,7 +84,7 @@ fun PayPane(
                     )
                 }
             }
-        } else if (money != null) {
+        } else {
             item { PayTiles(money) }
 
             if (money.canReq) {
@@ -110,7 +111,7 @@ fun PayPane(
                     )
                 }
                 items(money.corrections) { p ->
-                    CorrectionItem(p, state.booksById)
+                    CorrectionItem(p, booksById)
                 }
             }
 
@@ -134,7 +135,7 @@ fun PayPane(
                     )
                 }
                 items(money.bookSums) { bs ->
-                    BookEarnItem(state.booksById[bs.bookId], bs, vm::rateOf)
+                    BookEarnItem(booksById[bs.bookId], bs, vm::rateOf)
                 }
             }
         }
@@ -207,7 +208,7 @@ private fun PayHistoryItem(x: JSONObject) {
     ) {
         val status = x.optString("status", "pending")
         val color = when (status) {
-            "approved" -> AppColors.extra.ok
+            "completed" -> AppColors.extra.ok
             "rejected" -> MaterialTheme.colorScheme.error
             else -> AppColors.extra.warn
         }
@@ -243,7 +244,7 @@ private fun PayHistoryItem(x: JSONObject) {
 
         Text(
             text = when (status) {
-                "approved" -> "✅ পরিশোধিত"
+                "completed" -> "✅ পরিশোধিত"
                 "rejected" -> "❌ বাতিল"
                 else -> "⏳ পেন্ডিং"
             },
