@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -61,7 +60,7 @@ fun TaskDashboard(
         Spacer(Modifier.height(4.dp))
         GoalCard(state.todayCount, state.goal, state.goalHit, pct, left, onGoal)
         StreakCard(streak.current, streak.best, streak.doneToday)
-        
+
         if (resume != null) {
             Box(
                 modifier = Modifier
@@ -74,7 +73,7 @@ fun TaskDashboard(
                         RoundedCornerShape(12.dp)
                     )
                     .clickable {
-                        val id = resume.book.getString("id")
+                        val id = resume.book.optString("id", "")
                         val done = state.proofs.count { it.optString("book_id") == id }
                         onResume(id, done + 1)
                     }
@@ -241,7 +240,7 @@ fun resumeTarget(resume: JSONObject?, booksById: Map<String, JSONObject>, proofs
     val name = resume.optString("name", "")
     val done = proofs.count { it.optString("book_id") == id }
     val total = resume.optInt("total_pages", 0)
-    val stem = "$name · পেইজ ${bnInt(done + 1)}/${bnInt(total)}"
+    val stem = "$name · পেইজ ${bn(done + 1)}/${bn(total)}"
     return ResumeTarget(resume, stem)
 }
 
@@ -257,7 +256,6 @@ fun streakInfo(proofs: List<JSONObject>): StreakInfo {
     val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
     val doneToday = dates.firstOrNull() == today
 
-    var cur = 0
     var best = 0
     var temp = 0
     var prev: String? = null
@@ -273,7 +271,7 @@ fun streakInfo(proofs: List<JSONObject>): StreakInfo {
         prev = d
     }
 
-    cur = if (doneToday) {
+    val cur = if (doneToday) {
         temp
     } else {
         val yesterday = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(
@@ -293,11 +291,6 @@ private fun daysBetween(a: String, b: String): Long {
 }
 
 private fun bn(n: Int): String {
-    val digits = "০১২৩৪৫৬৭৮৯"
-    return n.toString().map { if (it.isDigit()) digits[it - '0'] else it }.joinToString("")
-}
-
-private fun bnInt(n: Int): String {
     val digits = "০১২৩৪৫৬৭৮৯"
     return n.toString().map { if (it.isDigit()) digits[it - '0'] else it }.joinToString("")
 }

@@ -1,11 +1,5 @@
 package com.srizwan.task.task
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,95 +15,72 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.srizwan.task.AppColors
-import com.srizwan.task.R
 import org.json.JSONObject
 
 @Composable
 fun BookGrid(
-    ready: Boolean,
-    me: Int,
     books: List<JSONObject>,
     proofs: List<JSONObject>,
-    booksById: Map<String, JSONObject>,
     query: String,
     onQueryChange: (String) -> Unit,
-    goal: Int,
-    resume: ResumeTarget?,
-    rateOf: (JSONObject?) -> Int,
-    onResume: (String, Int) -> Unit,
-    onOpen: (String, Int) -> Unit,
-    modifier: Modifier = Modifier
+    onOpen: (JSONObject, Int) -> Unit
 ) {
-    val myProofs = proofs.filter { it.optInt("user_id") == me }
     val filtered = if (query.isBlank()) books else books.filter {
         it.optString("name", "").contains(query, ignoreCase = true)
     }
 
-    Column(modifier = modifier.padding(horizontal = 16.dp)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
             placeholder = { Text("কিতাব খুঁজুন...") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            leadingIcon = {
-                Icon(
-                    painter = painterResource(R.drawable.rizwantask),
-                    contentDescription = null
-                )
-            }
+            singleLine = true
         )
 
         Spacer(Modifier.height(12.dp))
 
-        if (!ready) {
-            SkeletonGrid()
-        } else if (filtered.isEmpty()) {
+        if (filtered.isEmpty()) {
             EmptyView(failed = false)
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(bottom = 16.dp),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(filtered) { book ->
                     val id = book.optString("id", "")
-                    val done = myProofs.count { it.optString("book_id") == id }
+                    val done = proofs.count { it.optString("book_id") == id }
                     val total = book.optInt("total_pages", 0)
-                    val next = done + 1
-                    BookCard(
-                        book = book,
-                        done = done,
-                        total = total,
-                        rate = rateOf(book),
-                        onClick = { onOpen(id, next) }
-                    )
+                    BookCard(book, done, total) {
+                        onOpen(book, done + 1)
+                    }
                 }
             }
         }
@@ -121,33 +92,34 @@ private fun BookCard(
     book: JSONObject,
     done: Int,
     total: Int,
-    rate: Int,
     onClick: () -> Unit
 ) {
-    Column(
+    Box(
         modifier = Modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick)
-            .padding(8.dp)
+            .padding(12.dp)
     ) {
-        Cover(url = book.optString("cover_url", ""))
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = book.optString("name", ""),
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-            maxLines = 2,
-            minLines = 2,
-            lineHeight = 18.sp
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = rateTxt(rate),
-            style = MaterialTheme.typography.bodySmall,
-            color = AppColors.extra.muted
-        )
-        Spacer(Modifier.height(8.dp))
-        Progress(done, total)
+        Column {
+            Cover(book.optString("cover_url", ""))
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = book.optString("name", "কিতাব"),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = rateTxt(book.optInt("rate_per_page", 1)),
+                style = MaterialTheme.typography.bodySmall,
+                color = AppColors.extra.muted
+            )
+            Spacer(Modifier.height(8.dp))
+            Progress(done, total)
+        }
     }
 }
 
@@ -169,11 +141,9 @@ private fun Cover(url: String) {
                 contentScale = ContentScale.Crop
             )
         } else {
-            Icon(
-                painter = painterResource(R.drawable.rizwantask),
-                contentDescription = null,
-                modifier = Modifier.size(48.dp),
-                tint = AppColors.extra.muted
+            Text(
+                text = "📖",
+                style = MaterialTheme.typography.headlineLarge
             )
         }
     }
@@ -183,20 +153,31 @@ private fun Cover(url: String) {
 private fun Progress(done: Int, total: Int) {
     val pct = if (total > 0) done.toFloat() / total else 0f
     Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${bn(done)}/${bn(total)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = AppColors.extra.muted
+            )
+            Text(
+                text = "${(pct * 100).toInt()}%",
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        Spacer(Modifier.height(4.dp))
         LinearProgressIndicator(
-            progress = { pct },
+            progress = { pct.coerceIn(0f, 1f) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(6.dp)
-                .clip(RoundedCornerShape(3.dp)),
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp)),
             color = MaterialTheme.colorScheme.primary,
             trackColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = "${bn(done)}/${bn(total)} পেইজ (${bn((pct * 100).toInt())}%)",
-            style = MaterialTheme.typography.bodySmall,
-            color = AppColors.extra.muted
         )
     }
 }
@@ -205,58 +186,49 @@ private fun Progress(done: Int, total: Int) {
 private fun SkeletonGrid() {
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
-        contentPadding = PaddingValues(bottom = 16.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        items(6) {
-            SkeletonCard()
-        }
+        items(6) { SkeletonCard() }
     }
 }
 
 @Composable
 private fun SkeletonCard() {
-    val transition = rememberInfiniteTransition(label = "skeleton")
-    val alpha by transition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 0.7f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "alpha"
-    )
-
-    Column(
+    Box(
         modifier = Modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surface)
-            .padding(8.dp)
+            .padding(12.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.7f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha))
-        )
-        Spacer(Modifier.height(8.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.8f)
-                .height(16.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha))
-        )
-        Spacer(Modifier.height(4.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.5f)
-                .height(14.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha))
-        )
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(0.7f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            )
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.8f)
+                    .height(16.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            )
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.4f)
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            )
+        }
     }
 }
 
@@ -264,21 +236,19 @@ private fun SkeletonCard() {
 private fun EmptyView(failed: Boolean) {
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(200.dp),
+            .fillMaxSize()
+            .padding(32.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                painter = painterResource(R.drawable.rizwantask),
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = AppColors.extra.muted
-            )
-            Spacer(Modifier.height(8.dp))
             Text(
-                text = if (failed) "কিতাব লোড করা যায়নি" else "কোনো কিতাব পাওয়া যায়নি",
-                style = MaterialTheme.typography.bodyMedium,
+                text = if (failed) "📭" else "🔍",
+                style = MaterialTheme.typography.displayLarge
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = if (failed) "কিতাব লোড হয়নি" else "কোনো কিতাব পাওয়া যায়নি",
+                style = MaterialTheme.typography.bodyLarge,
                 color = AppColors.extra.muted,
                 textAlign = TextAlign.Center
             )

@@ -20,7 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,12 +28,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.srizwan.task.AppColors
-import com.srizwan.task.R
 import com.srizwan.task.TaskState
 import com.srizwan.task.TaskViewModel
 import org.json.JSONObject
@@ -48,7 +45,7 @@ fun PayPane(
 ) {
     val money = state.money
     val context = LocalContext.current
-    
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -98,11 +95,7 @@ fun PayPane(
                             containerColor = MaterialTheme.colorScheme.primary
                         )
                     ) {
-                        Icon(
-                            painter = painterResource(R.drawable.rizwantask),
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Text("💰", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.width(8.dp))
                         Text("পেমেন্টের জন্য অনুরোধ করুন")
                     }
@@ -158,13 +151,13 @@ private fun PayTiles(money: com.srizwan.task.FinData) {
     ) {
         PayTile(
             label = "অনুমোদিত",
-            value = money(money.approved),
+            value = moneyStr(money.approved),
             color = AppColors.extra.ok,
             modifier = Modifier.weight(1f)
         )
         PayTile(
             label = "পেন্ডিং",
-            value = money(money.pending),
+            value = moneyStr(money.pending),
             color = AppColors.extra.warn,
             modifier = Modifier.weight(1f)
         )
@@ -226,11 +219,9 @@ private fun PayHistoryItem(x: JSONObject) {
                 .background(color.copy(alpha = 0.1f)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                painter = painterResource(R.drawable.rizwantask),
-                contentDescription = null,
-                tint = color,
-                modifier = Modifier.size(20.dp)
+            Text(
+                text = "💰",
+                style = MaterialTheme.typography.titleMedium
             )
         }
 
@@ -238,7 +229,7 @@ private fun PayHistoryItem(x: JSONObject) {
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = money(x.optInt("amount", 0)),
+                text = moneyStr(x.optInt("amount", 0)),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
             )
             Text(
@@ -279,7 +270,7 @@ private fun BookEarnItem(b: JSONObject?, x: com.srizwan.task.BookPaySum, rateOf:
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "মোট: ${money(x.total)}",
+                text = "মোট: ${moneyStr(x.total)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = AppColors.extra.muted
             )
@@ -314,7 +305,7 @@ private fun SegBar(a: Int, p: Int, c: Int, tot: Int) {
             if (p > 0) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(pPct / (1f - aPct))
+                        .fillMaxWidth(pPct / (1f - aPct).coerceAtLeast(0.01f))
                         .height(8.dp)
                         .background(AppColors.extra.warn)
                 )
@@ -361,7 +352,7 @@ private fun CorrectionItem(p: JSONObject, booksById: Map<String, JSONObject>) {
     }
 }
 
-private fun money(n: Int): String = "৳${bn(n)}"
+private fun moneyStr(n: Int): String = "৳${bn(n)}"
 
 private fun bn(n: Int): String {
     val digits = "০১২৩৪৫৬৭৮৯"
