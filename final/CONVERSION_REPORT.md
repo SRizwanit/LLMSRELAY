@@ -13,4 +13,4 @@
 - 4d: e: file:///home/runner/work/LLMSRELAY/LLMSRELAY/final/app/src/main/kotlin/com/srizwan/task/task/TaskDashboard.kt:215:22 None of the following candidates is applicable: * What went wrong: Execution failed for task ':app:compileDebugKotlin' (registered by plugin 'org.jetbrains.kotlin.android'). > A fa
 
 ## ⏸ থেমে আছে
-- 4d: ক্রেডিট শেষ (402 Insufficient credits)
+- 4d: API key ভুল বা অনুমতি নেই (401/403)
